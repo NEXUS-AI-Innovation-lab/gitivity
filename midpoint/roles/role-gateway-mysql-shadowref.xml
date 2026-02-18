@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Role avec shadowRef pour profil MySQL via REST Gateway
+
+    INSTRUCTIONS:
+    1. Rebuilder le connecteur (version 1.2.0-SNAPSHOT)
+    2. Redéployer le JAR dans MidPoint
+    3. Faire "Refresh Schema" sur la ressource
+    4. Aller dans Resources > Test RabbitMQ v2 > Content > Entitlement (mysqlProfile)
+    5. Cliquer "Refresh" pour découvrir les profils
+    6. Copier l'OID du shadow du profil souhaité (readonly, readwrite, admin)
+    7. Remplacer "REMPLACER_PAR_OID_DU_SHADOW_MYSQL" par cet OID
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+      xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3"
+      xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+      xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+      xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+      oid="a1b2c3d4-my-prof-0000-000000000002">
+
+    <name>Gateway - MySQL Readwrite (shadowRef)</name>
+    <description>Assigne le profil MySQL "readwrite" via la REST Gateway en utilisant shadowRef</description>
+
+    <inducement>
+        <construction>
+            <!-- Ressource REST Gateway RabbitMQ -->
+            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="c:ResourceType"/>
+            <kind>account</kind>
+            <intent>default</intent>
+            <attribute>
+                <ref>ri:roles</ref>
+                <outbound>
+                    <expression>
+                        <value>mysql</value>
+                    </expression>
+                </outbound>
+            </attribute>
+            <!-- Association vers le profil MySQL via shadowRef -->
+            <association>
+                <ref>ri:mysqlProfile</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <value>
+                            <!-- REMPLACER par l'OID du shadow découvert après Refresh -->
+                            <shadowRef oid="f18d9364-4d8f-4a2a-b445-7c5a6a31648c" type="c:ShadowType"/>
+                        </value>
+                    </expression>
+                </outbound>
+            </association>
+        </construction>
+    </inducement>
+</role>

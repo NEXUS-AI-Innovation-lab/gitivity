@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connector Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px; }
+        h1 { text-align: center; margin-bottom: 30px; color: #00d4ff; }
+        .tabs { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; }
+        .tab-btn { padding: 15px 40px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-weight: bold; }
+        .tab-btn.inbound { background: #4CAF50; color: white; }
+        .tab-btn.outbound { background: #2196F3; color: white; }
+        .tab-btn.roles { background: #9C27B0; color: white; }
+        .tab-btn.users { background: #FF5722; color: white; }
+        .tab-btn:hover { transform: scale(1.05); box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        .tab-btn.active { box-shadow: 0 0 20px rgba(255,255,255,0.3); transform: scale(1.1); }
+        .content { max-width: 1000px; margin: 0 auto; }
+        .section { display: none; }
+        .section.active { display: block; }
+        .section-title { font-size: 24px; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #333; }
+        .connector-list { display: grid; gap: 15px; }
+        .connector-card { background: #16213e; border-radius: 10px; padding: 20px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #666; }
+        .connector-card.online { border-left-color: #4CAF50; }
+        .connector-card.offline { border-left-color: #f44336; }
+        .connector-card.unknown { border-left-color: #ff9800; }
+        .connector-info h3 { font-size: 18px; margin-bottom: 5px; }
+        .connector-info p { color: #888; font-size: 14px; }
+        .status-badge { padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; text-transform: uppercase; }
+        .status-badge.online { background: #4CAF50; color: white; }
+        .status-badge.offline { background: #f44336; color: white; }
+        .status-badge.unknown { background: #ff9800; color: white; }
+        .loading { text-align: center; padding: 40px; color: #888; }
+        .error { background: #f44336; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .refresh-btn { background: #333; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
+        .refresh-btn:hover { background: #444; }
+        .role-form { background: #16213e; padding: 25px; border-radius: 10px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #00d4ff; }
+        .form-input { width: 100%; padding: 12px; border: 1px solid #333; border-radius: 5px; background: #1a1a2e; color: #eee; font-size: 14px; }
+        .form-input:focus { outline: none; border-color: #00d4ff; }
+        .form-select { width: 100%; padding: 12px; border: 1px solid #333; border-radius: 5px; background: #1a1a2e; color: #eee; font-size: 14px; cursor: pointer; }
+        .form-select:focus { outline: none; border-color: #00d4ff; }
+        .subsection-title { color: #9C27B0; margin: 25px 0 15px 0; padding-bottom: 8px; border-bottom: 1px solid #333; }
+        .service-selector { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; }
+        .service-radio { display: flex; align-items: center; gap: 10px; padding: 15px 25px; background: #1a1a2e; border-radius: 8px; cursor: pointer; transition: all 0.3s; border: 2px solid transparent; }
+        .service-radio:hover { background: #252545; }
+        .service-radio.selected { border-color: #9C27B0; background: #252545; }
+        .service-radio input[type="radio"] { width: 20px; height: 20px; accent-color: #9C27B0; }
+        .service-radio span { font-size: 16px; font-weight: bold; }
+        .service-radio.mysql span { color: #4CAF50; }
+        .service-radio.postgresql span { color: #336791; }
+        .service-radio.ldap span { color: #FF9800; }
+        .service-radio.odoo span { color: #714B67; }
+        .grants-section { display: none; margin-top: 20px; padding: 20px; background: #1a1a2e; border-radius: 8px; }
+        .grants-section.active { display: block; }
+        .grants-row { display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px; }
+        .grant-select-group { flex: 1; min-width: 200px; }
+        .grant-select-group label { display: block; margin-bottom: 5px; color: #888; font-size: 12px; }
+        .ldap-groups-container { max-height: 200px; overflow-y: auto; border: 1px solid #333; border-radius: 5px; padding: 10px; }
+        .ldap-group-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 4px; cursor: pointer; }
+        .ldap-group-item:hover { background: #252545; }
+        .ldap-group-item input[type="radio"] { width: 18px; height: 18px; accent-color: #FF9800; }
+        .generate-btn { background: #9C27B0; color: white; border: none; padding: 15px 30px; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .generate-btn:hover { background: #7B1FA2; }
+        .xml-output { background: #0d0d1a; padding: 20px; border-radius: 5px; overflow-x: auto; font-family: monospace; font-size: 12px; color: #4CAF50; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+        /* User management styles */
+        .user-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .user-table th, .user-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #333; }
+        .user-table th { background: #16213e; color: #00d4ff; font-weight: bold; }
+        .user-table tr:hover { background: #1a2744; }
+        .user-actions { display: flex; gap: 8px; }
+        .btn-sm { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-success { background: #4CAF50; color: white; }
+        .btn-edit { background: #FF9800; color: white; }
+        .btn-danger:hover { background: #d32f2f; }
+        .btn-success:hover { background: #388E3C; }
+        .btn-edit:hover { background: #F57C00; }
+        .group-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+        .group-badge { background: #333; padding: 2px 8px; border-radius: 12px; font-size: 11px; color: #FF9800; }
+        .user-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .service-tabs { display: flex; gap: 8px; }
+        .svc-tab { padding: 8px 18px; border: 2px solid #333; border-radius: 5px; cursor: pointer; font-weight: bold; background: #16213e; color: #888; transition: all 0.2s; }
+        .svc-tab:hover { border-color: #555; color: #eee; }
+        .svc-tab.active { color: white; }
+        .svc-tab.active[data-svc="mysql"] { border-color: #4CAF50; background: #1b3a1b; color: #4CAF50; }
+        .svc-tab.active[data-svc="postgresql"] { border-color: #336791; background: #1b2a3a; color: #6fa8dc; }
+        .svc-tab.active[data-svc="ldap"] { border-color: #FF9800; background: #3a2a1b; color: #FF9800; }
+        .svc-tab.active[data-svc="odoo"] { border-color: #714B67; background: #2a1b25; color: #c08ab5; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: #16213e; border-radius: 10px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal h3 { color: #00d4ff; margin-bottom: 20px; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .modal-error { background: #f44336; padding: 10px; border-radius: 5px; margin-top: 15px; display: none; }
+        .modal-success { background: #4CAF50; padding: 10px; border-radius: 5px; margin-top: 15px; display: none; }
+        .role-checkboxes { max-height: 200px; overflow-y: auto; border: 1px solid #333; border-radius: 5px; padding: 10px; }
+        .role-checkbox-item { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 4px; }
+        .role-checkbox-item:hover { background: #252545; }
+        .role-checkbox-item input { accent-color: #FF5722; }
+        /* Connector settings button */
+        .connector-actions { display: flex; align-items: center; gap: 12px; }
+        .btn-settings { background: #333; border: none; color: #00d4ff; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; transition: all 0.2s; }
+        .btn-settings:hover { background: #444; transform: rotate(45deg); }
+        /* Config modal styles */
+        .config-section { margin-bottom: 25px; }
+        .config-section h4 { color: #9C27B0; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #333; }
+        .config-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .config-table th, .config-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #333; }
+        .config-table th { background: #1a1a2e; color: #888; font-weight: normal; }
+        .config-table td:first-child { color: #888; width: 40%; }
+        .config-table code { background: #0d0d1a; padding: 2px 6px; border-radius: 3px; color: #4CAF50; font-family: monospace; }
+        .modal-lg { max-width: 700px; }
+    </style>
+</head>
+<body>
+    <h1>Connector Dashboard</h1>
+    <div class="tabs">
+        <button class="tab-btn inbound" onclick="showTab('inbound')">INBOUND</button>
+        <button class="tab-btn outbound active" onclick="showTab('outbound')">OUTBOUND</button>
+        <button class="tab-btn roles" onclick="showTab('roles')">ROLES</button>
+        <button class="tab-btn users" onclick="showTab('users')">USERS</button>
+    </div>
+    <div class="content">
+        <div id="inbound-section" class="section">
+            <h2 class="section-title">Inbound - MidPoint Resources</h2>
+            <button class="refresh-btn" onclick="loadMidpointResources()">Refresh</button>
+            <div id="inbound-list" class="connector-list"><div class="loading">Chargement...</div></div>
+        </div>
+        <div id="outbound-section" class="section active">
+            <h2 class="section-title">Outbound - Gateway-IAM Connectors</h2>
+            <button class="refresh-btn" onclick="loadGatewayConnectors()">Refresh</button>
+            <div id="outbound-list" class="connector-list"><div class="loading">Chargement...</div></div>
+        </div>
+        <div id="roles-section" class="section">
+            <h2 class="section-title">Role XML Creator</h2>
+            <div class="role-form">
+                <div class="form-group">
+                    <label>Nom du Role</label>
+                    <input type="text" id="role-name" placeholder="ex: developer-role" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="role-description" placeholder="Description du role" class="form-input">
+                </div>
+
+                <h3 class="subsection-title">Service Cible (1 seul)</h3>
+                <div class="service-selector">
+                    <label class="service-radio mysql" onclick="selectService('mysql')">
+                        <input type="radio" name="target-service" value="mysql">
+                        <span>MySQL</span>
+                    </label>
+                    <label class="service-radio postgresql" onclick="selectService('postgresql')">
+                        <input type="radio" name="target-service" value="postgresql">
+                        <span>PostgreSQL</span>
+                    </label>
+                    <label class="service-radio ldap" onclick="selectService('ldap')">
+                        <input type="radio" name="target-service" value="ldap">
+                        <span>LDAP</span>
+                    </label>
+                    <label class="service-radio odoo" onclick="selectService('odoo')">
+                        <input type="radio" name="target-service" value="odoo">
+                        <span>Odoo</span>
+                    </label>
+                </div>
+
+                <!-- MySQL Grants Section -->
+                <div id="mysql-grants-section" class="grants-section">
+                    <h4 style="color: #4CAF50; margin-bottom: 15px;">Configuration MySQL</h4>
+                    <div class="grants-row">
+                        <div class="grant-select-group">
+                            <label>Niveau d'acces</label>
+                            <select id="mysql-access-level" class="form-select">
+                                <option value="">-- Choisir --</option>
+                                <option value="readonly">Lecture seule (SELECT)</option>
+                                <option value="readwrite">Lecture/Ecriture (SELECT, INSERT, UPDATE, DELETE)</option>
+                                <option value="admin">Admin (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX)</option>
+                                <option value="custom">Personnalise...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="mysql-custom-grants" style="display:none; margin-top: 15px;">
+                        <label style="color: #888; font-size: 12px;">Grants personnalises (separes par virgule)</label>
+                        <input type="text" id="mysql-custom-input" class="form-input" placeholder="SELECT, INSERT, UPDATE">
+                    </div>
+                </div>
+
+                <!-- PostgreSQL Grants Section -->
+                <div id="postgresql-grants-section" class="grants-section">
+                    <h4 style="color: #336791; margin-bottom: 15px;">Configuration PostgreSQL</h4>
+                    <div class="grants-row">
+                        <div class="grant-select-group">
+                            <label>Niveau d'acces</label>
+                            <select id="postgresql-access-level" class="form-select">
+                                <option value="">-- Choisir --</option>
+                                <option value="readonly">Lecture seule (SELECT)</option>
+                                <option value="readwrite">Lecture/Ecriture (SELECT, INSERT, UPDATE, DELETE)</option>
+                                <option value="admin">Admin (ALL PRIVILEGES)</option>
+                                <option value="custom">Personnalise...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="postgresql-custom-grants" style="display:none; margin-top: 15px;">
+                        <label style="color: #888; font-size: 12px;">Grants personnalises (separes par virgule)</label>
+                        <input type="text" id="postgresql-custom-input" class="form-input" placeholder="SELECT, INSERT, UPDATE, TRUNCATE">
+                    </div>
+                </div>
+
+                <!-- LDAP Groups Section -->
+                <div id="ldap-grants-section" class="grants-section">
+                    <h4 style="color: #FF9800; margin-bottom: 15px;">Configuration LDAP</h4>
+                    <div class="form-group">
+                        <label>Groupe LDAP</label>
+                        <select id="ldap-group-select" class="form-select">
+                            <option value="">-- Chargement... --</option>
+                        </select>
+                    </div>
+                    <button class="refresh-btn" onclick="loadLdapGroups()" style="margin-top:10px;">Rafraichir groupes LDAP</button>
+                </div>
+
+                <!-- Odoo Section -->
+                <div id="odoo-grants-section" class="grants-section">
+                    <h4 style="color: #714B67; margin-bottom: 15px;">Configuration Odoo</h4>
+                    <div class="grants-row">
+                        <div class="grant-select-group">
+                            <label>Groupe Odoo</label>
+                            <select id="odoo-group" class="form-select">
+                                <option value="">-- Choisir --</option>
+                                <option value="base.group_user">Utilisateur interne</option>
+                                <option value="base.group_portal">Portail</option>
+                                <option value="base.group_public">Public</option>
+                                <option value="sales_team.group_sale_salesman">Commercial</option>
+                                <option value="sales_team.group_sale_manager">Responsable commercial</option>
+                                <option value="account.group_account_user">Comptable</option>
+                                <option value="account.group_account_manager">Responsable comptable</option>
+                                <option value="hr.group_hr_user">RH</option>
+                                <option value="hr.group_hr_manager">Responsable RH</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top:30px;">
+                    <button class="generate-btn" onclick="generateRoleXML()">Generer XML</button>
+                    <button class="refresh-btn" onclick="downloadRoleXML()" style="margin-left:10px;">Telecharger</button>
+                </div>
+                <h3 class="subsection-title" style="margin-top:30px;">XML Genere</h3>
+                <pre id="xml-output" class="xml-output">Selectionnez un service et configurez les options...</pre>
+            </div>
+        </div>
+        <!-- USERS Section -->
+        <div id="users-section" class="section">
+            <h2 class="section-title">Gestion des Utilisateurs</h2>
+            <div class="user-toolbar">
+                <div class="service-tabs">
+                    <button class="svc-tab" data-svc="midpoint" onclick="switchUserService('midpoint')" style="border-color:#00d4ff;">MidPoint</button>
+                    <button class="svc-tab active" data-svc="mysql" onclick="switchUserService('mysql')">MySQL</button>
+                    <button class="svc-tab" data-svc="postgresql" onclick="switchUserService('postgresql')">PostgreSQL</button>
+                    <button class="svc-tab" data-svc="ldap" onclick="switchUserService('ldap')">LDAP</button>
+                    <button class="svc-tab" data-svc="odoo" onclick="switchUserService('odoo')">Odoo</button>
+                </div>
+                <button class="refresh-btn" onclick="loadServiceUsers()">Refresh</button>
+                <button class="btn-sm btn-success" onclick="openCreateUserModal()" style="padding: 10px 20px; font-size: 14px;">+ Nouvel Utilisateur</button>
+                <button class="btn-sm btn-edit" onclick="openAssignUserModal()" style="padding: 10px 20px; font-size: 14px;">+ Assigner Utilisateur</button>
+            </div>
+            <div id="users-list"><div class="loading">Selectionnez un service...</div></div>
+        </div>
+    </div>
+
+    <!-- Create User Modal -->
+    <div id="create-user-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Creer un Utilisateur - <span id="create-modal-service"></span></h3>
+            <div class="form-group">
+                <label>Nom d'utilisateur *</label>
+                <input type="text" id="new-username" class="form-input" placeholder="username">
+            </div>
+            <div class="form-group">
+                <label>Mot de passe *</label>
+                <input type="password" id="new-password" class="form-input" placeholder="Mot de passe">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="new-email" class="form-input" placeholder="user@example.com">
+            </div>
+            <div id="create-fullname-group" class="form-group" style="display:none;">
+                <label>Nom complet</label>
+                <input type="text" id="new-fullname" class="form-input" placeholder="John Doe">
+            </div>
+            <div id="create-lastname-group" class="form-group" style="display:none;">
+                <label>Nom de famille</label>
+                <input type="text" id="new-lastname" class="form-input" placeholder="Doe">
+            </div>
+            <div class="form-group">
+                <label>Role / Groupe</label>
+                <div id="create-roles-container"><div class="loading">Chargement...</div></div>
+            </div>
+            <div class="modal-actions">
+                <button class="generate-btn" onclick="createUser()">Creer</button>
+                <button class="refresh-btn" onclick="closeModal('create-user-modal')">Annuler</button>
+            </div>
+            <div id="create-user-error" class="modal-error"></div>
+            <div id="create-user-success" class="modal-success"></div>
+        </div>
+    </div>
+
+    <!-- Assign User Modal -->
+    <div id="assign-user-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Assigner un Utilisateur a <span id="assign-modal-service"></span></h3>
+            <p style="color:#888; margin-bottom:15px;">Ajouter un utilisateur existant a ce service (envoie une demande via RabbitMQ)</p>
+            <div class="form-group">
+                <label>Nom d'utilisateur *</label>
+                <input type="text" id="assign-username" class="form-input" placeholder="username existant">
+            </div>
+            <div class="form-group">
+                <label>Mot de passe (pour ce service) *</label>
+                <input type="password" id="assign-password" class="form-input" placeholder="Mot de passe">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="assign-email" class="form-input" placeholder="user@example.com">
+            </div>
+            <div id="assign-fullname-group" class="form-group" style="display:none;">
+                <label>Nom complet</label>
+                <input type="text" id="assign-fullname" class="form-input" placeholder="John Doe">
+            </div>
+            <div id="assign-lastname-group" class="form-group" style="display:none;">
+                <label>Nom de famille</label>
+                <input type="text" id="assign-lastname" class="form-input" placeholder="Doe">
+            </div>
+            <div class="form-group">
+                <label>Role / Groupe</label>
+                <div id="assign-roles-container"><div class="loading">Chargement...</div></div>
+            </div>
+            <div class="modal-actions">
+                <button class="generate-btn" onclick="assignUser()">Assigner</button>
+                <button class="refresh-btn" onclick="closeModal('assign-user-modal')">Annuler</button>
+            </div>
+            <div id="assign-user-error" class="modal-error"></div>
+            <div id="assign-user-success" class="modal-success"></div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="edit-user-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Modifier l'Utilisateur - <span id="edit-modal-service"></span></h3>
+            <div class="form-group">
+                <label>Nom d'utilisateur</label>
+                <input type="text" id="edit-username" class="form-input" readonly style="background:#333;color:#888;">
+            </div>
+            <div class="form-group">
+                <label>Nouveau mot de passe (laisser vide pour ne pas changer)</label>
+                <input type="password" id="edit-password" class="form-input" placeholder="Nouveau mot de passe">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email" class="form-input" placeholder="user@example.com">
+            </div>
+            <div id="edit-fullname-group" class="form-group" style="display:none;">
+                <label>Nom complet</label>
+                <input type="text" id="edit-fullname" class="form-input" placeholder="John Doe">
+            </div>
+            <div id="edit-lastname-group" class="form-group" style="display:none;">
+                <label>Nom de famille</label>
+                <input type="text" id="edit-lastname" class="form-input" placeholder="Doe">
+            </div>
+            <div class="form-group">
+                <label>Roles actuels</label>
+                <div id="edit-current-roles" style="margin-bottom:10px;"><span style="color:#666;">Aucun</span></div>
+            </div>
+            <div class="form-group">
+                <label>Assigner un role</label>
+                <div id="edit-roles-container"><div class="loading">Chargement...</div></div>
+            </div>
+            <div class="modal-actions">
+                <button class="generate-btn" onclick="updateUser()">Mettre a jour</button>
+                <button class="refresh-btn" onclick="closeModal('edit-user-modal')">Annuler</button>
+            </div>
+            <div id="edit-user-error" class="modal-error"></div>
+            <div id="edit-user-success" class="modal-success"></div>
+        </div>
+    </div>
+
+    <!-- MidPoint Role Assignment Modal -->
+    <div id="midpoint-role-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Assigner un Role MidPoint a <span id="midpoint-role-username"></span></h3>
+            <p style="color:#888; margin-bottom:15px;">Assigner un role declenchera le provisioning automatique vers les services cibles</p>
+            <div class="form-group">
+                <label>Role MidPoint</label>
+                <div id="midpoint-roles-container"><div class="loading">Chargement...</div></div>
+            </div>
+            <div class="modal-actions">
+                <button class="generate-btn" onclick="assignMidpointRole()">Assigner</button>
+                <button class="refresh-btn" onclick="closeModal('midpoint-role-modal')">Annuler</button>
+            </div>
+            <div id="midpoint-role-error" class="modal-error"></div>
+            <div id="midpoint-role-success" class="modal-success"></div>
+        </div>
+    </div>
+
+    <!-- MidPoint Create User Modal -->
+    <div id="midpoint-create-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>Creer un Utilisateur dans MidPoint</h3>
+            <p style="color:#888; margin-bottom:15px;">Cet utilisateur sera cree dans MidPoint (source de verite)</p>
+            <div class="form-group">
+                <label>Nom d'utilisateur *</label>
+                <input type="text" id="midpoint-new-username" class="form-input" placeholder="username">
+            </div>
+            <div class="form-group">
+                <label>Mot de passe *</label>
+                <input type="password" id="midpoint-new-password" class="form-input" placeholder="Mot de passe">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="midpoint-new-email" class="form-input" placeholder="user@example.com">
+            </div>
+            <div class="form-group">
+                <label>Nom complet</label>
+                <input type="text" id="midpoint-new-fullname" class="form-input" placeholder="John Doe">
+            </div>
+            <div class="form-group">
+                <label>Prenom</label>
+                <input type="text" id="midpoint-new-givenname" class="form-input" placeholder="John">
+            </div>
+            <div class="form-group">
+                <label>Nom de famille</label>
+                <input type="text" id="midpoint-new-familyname" class="form-input" placeholder="Doe">
+            </div>
+            <div class="modal-actions">
+                <button class="generate-btn" onclick="createMidpointUser()">Creer</button>
+                <button class="refresh-btn" onclick="closeModal('midpoint-create-modal')">Annuler</button>
+            </div>
+            <div id="midpoint-create-error" class="modal-error"></div>
+            <div id="midpoint-create-success" class="modal-success"></div>
+        </div>
+    </div>
+
+    <!-- Resource Configuration Modal -->
+    <div id="resource-config-modal" class="modal-overlay">
+        <div class="modal modal-lg">
+            <h3>Configuration - <span id="resource-config-name"></span></h3>
+            <div id="resource-config-content">
+                <div class="loading">Chargement...</div>
+            </div>
+            <div class="modal-actions">
+                <button class="refresh-btn" onclick="closeModal('resource-config-modal')">Fermer</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+var selectedService = null;
+
+function showTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
+    document.querySelector('.tab-btn.' + tab).classList.add('active');
+    document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
+    document.getElementById(tab + '-section').classList.add('active');
+    if (tab === 'inbound') loadMidpointResources();
+    else if (tab === 'outbound') loadGatewayConnectors();
+    else if (tab === 'roles') loadLdapGroups();
+    else if (tab === 'users') loadServiceUsers();
+}
+
+function selectService(service) {
+    selectedService = service;
+
+    // Update radio button visual
+    document.querySelectorAll('.service-radio').forEach(function(el) {
+        el.classList.remove('selected');
+    });
+    document.querySelector('.service-radio.' + service).classList.add('selected');
+    document.querySelector('.service-radio.' + service + ' input').checked = true;
+
+    // Hide all grant sections
+    document.querySelectorAll('.grants-section').forEach(function(el) {
+        el.classList.remove('active');
+    });
+
+    // Show selected service section
+    document.getElementById(service + '-grants-section').classList.add('active');
+
+    // Load LDAP groups if needed
+    if (service === 'ldap') {
+        loadLdapGroups();
+    }
+}
+
+function loadMidpointResources() {
+    var list = document.getElementById('inbound-list');
+    list.innerHTML = '<div class="loading">Chargement...</div>';
+    fetch('/api/midpoint/resources').then(function(r) {
+        var contentType = r.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error('MidPoint n\'est pas accessible ou ne repond pas en JSON');
+        }
+        return r.json();
+    }).then(function(data) {
+        if (data.status === 'error') { list.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>'; return; }
+        if (!data.resources || data.resources.length === 0) { list.innerHTML = '<div class="connector-card"><div class="connector-info"><h3>Aucune resource</h3></div></div>'; return; }
+        list.innerHTML = data.resources.map(function(r) {
+            var sc = r.status === 'up' ? 'online' : (r.status === 'down' ? 'offline' : 'unknown');
+            var st = r.status === 'up' ? 'UP' : (r.status === 'down' ? 'DOWN' : r.status.toUpperCase());
+            return '<div class="connector-card ' + sc + '">' +
+                '<div class="connector-info"><h3>' + escapeXml(r.name) + '</h3><p>OID: ' + escapeXml(r.oid) + '</p><p>Type: ' + escapeXml(r.type || 'Resource') + '</p></div>' +
+                '<div class="connector-actions">' +
+                '<button class="btn-settings" onclick="showResourceConfig(\'' + escapeXml(r.oid) + '\', \'' + escapeXml(r.name) + '\')" title="Configuration">&#9881;</button>' +
+                '<span class="status-badge ' + sc + '">' + st + '</span>' +
+                '</div></div>';
+        }).join('');
+    }).catch(function(e) { list.innerHTML = '<div class="error">Erreur: ' + e.message + '</div>'; });
+}
+
+function showResourceConfig(oid, name) {
+    var modal = document.getElementById('resource-config-modal');
+    var content = document.getElementById('resource-config-content');
+    document.getElementById('resource-config-name').textContent = name;
+    content.innerHTML = '<div class="loading">Chargement de la configuration...</div>';
+    modal.classList.add('active');
+
+    fetch('/api/midpoint/resources/' + encodeURIComponent(oid)).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'error') {
+            content.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>';
+            return;
+        }
+
+        var res = data.resource;
+        var html = '<div class="config-section">';
+        html += '<h4>Informations generales</h4>';
+        html += '<table class="config-table">';
+        html += '<tr><td>OID</td><td><code>' + escapeXml(res.oid) + '</code></td></tr>';
+        html += '<tr><td>Nom</td><td>' + escapeXml(res.name) + '</td></tr>';
+        if (res.description) html += '<tr><td>Description</td><td>' + escapeXml(res.description) + '</td></tr>';
+        html += '</table></div>';
+
+        // Connector configuration
+        if (res.connectorConfiguration && Object.keys(res.connectorConfiguration).length > 0) {
+            html += '<div class="config-section">';
+            html += '<h4>Configuration du connecteur</h4>';
+            html += '<table class="config-table">';
+            for (var key in res.connectorConfiguration) {
+                var val = res.connectorConfiguration[key];
+                if (typeof val === 'object') val = JSON.stringify(val);
+                html += '<tr><td>' + escapeXml(key) + '</td><td><code>' + escapeXml(String(val)) + '</code></td></tr>';
+            }
+            html += '</table></div>';
+        }
+
+        // Schema handling
+        if (res.schemaHandling && res.schemaHandling.length > 0) {
+            html += '<div class="config-section">';
+            html += '<h4>Schema Handling (Types d\'objets)</h4>';
+            html += '<table class="config-table">';
+            html += '<tr><th>Kind</th><th>Intent</th><th>Display Name</th><th>Default</th></tr>';
+            res.schemaHandling.forEach(function(s) {
+                html += '<tr><td>' + escapeXml(s.kind || '-') + '</td><td>' + escapeXml(s.intent || 'default') + '</td>';
+                html += '<td>' + escapeXml(s.displayName || '-') + '</td><td>' + (s.default ? 'Oui' : 'Non') + '</td></tr>';
+            });
+            html += '</table></div>';
+        }
+
+        // Synchronization
+        if (res.synchronization && res.synchronization.length > 0) {
+            html += '<div class="config-section">';
+            html += '<h4>Synchronisation</h4>';
+            html += '<table class="config-table">';
+            html += '<tr><th>Nom</th><th>Kind</th><th>Intent</th><th>Active</th></tr>';
+            res.synchronization.forEach(function(s) {
+                html += '<tr><td>' + escapeXml(s.name || '-') + '</td><td>' + escapeXml(s.kind || '-') + '</td>';
+                html += '<td>' + escapeXml(s.intent || '-') + '</td><td>' + (s.enabled !== false ? 'Oui' : 'Non') + '</td></tr>';
+            });
+            html += '</table></div>';
+        }
+
+        content.innerHTML = html;
+    }).catch(function(e) {
+        content.innerHTML = '<div class="error">Erreur: ' + escapeXml(e.message) + '</div>';
+    });
+}
+
+function loadGatewayConnectors() {
+    var list = document.getElementById('outbound-list');
+    list.innerHTML = '<div class="loading">Chargement...</div>';
+    fetch('/api/gateway/connectors').then(function(r) { return r.json(); }).then(function(data) {
+        list.innerHTML = data.connectors.map(function(c) {
+            return '<div class="connector-card ' + c.status + '"><div class="connector-info"><h3>' + c.name + '</h3><p>' + (c.details || '') + '</p></div><span class="status-badge ' + c.status + '">' + c.status + '</span></div>';
+        }).join('');
+    }).catch(function(e) { list.innerHTML = '<div class="error">Erreur: ' + e.message + '</div>'; });
+}
+
+function loadLdapGroups() {
+    var select = document.getElementById('ldap-group-select');
+    select.innerHTML = '<option value="">-- Chargement... --</option>';
+    fetch('/api/ldap/groups').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'error') {
+            select.innerHTML = '<option value="">Erreur: ' + data.message + '</option>';
+            return;
+        }
+        if (!data.groups || data.groups.length === 0) {
+            select.innerHTML = '<option value="">Aucun groupe LDAP disponible</option>';
+            return;
+        }
+        var options = '<option value="">-- Choisir un groupe --</option>';
+        data.groups.forEach(function(g) {
+            options += '<option value="' + g.dn + '">' + g.cn + '</option>';
+        });
+        select.innerHTML = options;
+    }).catch(function(e) {
+        select.innerHTML = '<option value="">Erreur de connexion LDAP</option>';
+        console.error('LDAP error:', e);
+    });
+}
+
+// Handle MySQL access level change
+document.getElementById('mysql-access-level').addEventListener('change', function() {
+    var customDiv = document.getElementById('mysql-custom-grants');
+    if (this.value === 'custom') {
+        customDiv.style.display = 'block';
+    } else {
+        customDiv.style.display = 'none';
+    }
+});
+
+// Handle PostgreSQL access level change
+document.getElementById('postgresql-access-level').addEventListener('change', function() {
+    var customDiv = document.getElementById('postgresql-custom-grants');
+    if (this.value === 'custom') {
+        customDiv.style.display = 'block';
+    } else {
+        customDiv.style.display = 'none';
+    }
+});
+
+function getMySQLGrants() {
+    var level = document.getElementById('mysql-access-level').value;
+    if (level === 'readonly') return ['SELECT'];
+    if (level === 'readwrite') return ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+    if (level === 'admin') return ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'INDEX'];
+    if (level === 'custom') {
+        var custom = document.getElementById('mysql-custom-input').value;
+        return custom.split(',').map(function(g) { return g.trim().toUpperCase(); }).filter(function(g) { return g; });
+    }
+    return [];
+}
+
+function getPostgreSQLGrants() {
+    var level = document.getElementById('postgresql-access-level').value;
+    if (level === 'readonly') return ['SELECT'];
+    if (level === 'readwrite') return ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+    if (level === 'admin') return ['ALL PRIVILEGES'];
+    if (level === 'custom') {
+        var custom = document.getElementById('postgresql-custom-input').value;
+        return custom.split(',').map(function(g) { return g.trim().toUpperCase(); }).filter(function(g) { return g; });
+    }
+    return [];
+}
+
+// Resource OID - replace with your actual MidPoint resource OID
+var GATEWAY_RESOURCE_OID = '736ea741-2c73-4478-b5d1-07d84cdf860f';
+
+function generateRoleXML() {
+    var roleName = document.getElementById('role-name').value || 'new-role';
+    var roleDesc = document.getElementById('role-description').value || '';
+
+    if (!selectedService) {
+        document.getElementById('xml-output').textContent = 'Erreur: Veuillez selectionner un service cible';
+        return;
+    }
+
+    var xml = '<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"\n';
+    xml += '      xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3">\n';
+    xml += '    <name>' + escapeXml(roleName) + '</name>\n';
+    xml += '    <description>' + escapeXml(roleDesc) + '</description>\n';
+    xml += '    <inducement>\n';
+    xml += '        <construction>\n';
+    xml += '            <resourceRef oid="' + GATEWAY_RESOURCE_OID + '" type="ResourceType"/>\n';
+    xml += '            <kind>account</kind>\n';
+
+    if (selectedService === 'mysql') {
+        var mysqlGrants = getMySQLGrants();
+        if (mysqlGrants.length === 0) {
+            document.getElementById('xml-output').textContent = 'Erreur: Veuillez selectionner un niveau d\'acces MySQL';
+            return;
+        }
+        // Attribut ri:roles pour identifier le service cible
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:roles</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>mysql</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+        // Attribut mysqlGrants pour les privileges
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:mysqlGrants</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>' + mysqlGrants.join(', ') + '</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+    }
+
+    if (selectedService === 'postgresql') {
+        var postgresqlGrants = getPostgreSQLGrants();
+        if (postgresqlGrants.length === 0) {
+            document.getElementById('xml-output').textContent = 'Erreur: Veuillez selectionner un niveau d\'acces PostgreSQL';
+            return;
+        }
+        // Attribut ri:roles pour identifier le service cible
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:roles</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>postgresql</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+        // Attribut postgresqlGrants pour les privileges
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:postgresqlGrants</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>' + postgresqlGrants.join(', ') + '</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+    }
+
+    if (selectedService === 'ldap') {
+        var ldapGroup = document.getElementById('ldap-group-select').value;
+        if (!ldapGroup) {
+            document.getElementById('xml-output').textContent = 'Erreur: Veuillez selectionner un groupe LDAP';
+            return;
+        }
+        // Attribut ri:roles pour identifier le service cible
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:roles</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>ldap</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+        // Attribut ldapGroups pour le groupe LDAP
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:ldapGroups</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>' + escapeXml(ldapGroup) + '</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+    }
+
+    if (selectedService === 'odoo') {
+        var odooGroup = document.getElementById('odoo-group').value;
+        if (!odooGroup) {
+            document.getElementById('xml-output').textContent = 'Erreur: Veuillez selectionner un groupe Odoo';
+            return;
+        }
+        // Attribut ri:roles pour identifier le service cible
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:roles</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>odoo</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+        // Attribut odooCreateUser
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:odooCreateUser</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>true</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+        // Attribut odooCreateEmployee
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:odooCreateEmployee</ref>\n';
+        xml += '                <outbound>\n';
+        xml += '                    <expression>\n';
+        xml += '                        <value>true</value>\n';
+        xml += '                    </expression>\n';
+        xml += '                </outbound>\n';
+        xml += '            </attribute>\n';
+    }
+
+    xml += '        </construction>\n';
+    xml += '    </inducement>\n';
+    xml += '</role>';
+    document.getElementById('xml-output').textContent = xml;
+}
+
+function escapeXml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function downloadRoleXML() {
+    var xml = document.getElementById('xml-output').textContent;
+    if (xml.indexOf('Erreur') === 0 || xml.indexOf('Selectionnez') === 0) {
+        alert('Veuillez d\'abord generer un XML valide');
+        return;
+    }
+    var roleName = document.getElementById('role-name').value || 'new-role';
+    var blob = new Blob([xml], { type: 'application/xml' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = roleName + '.xml';
+    a.click();
+}
+
+// =============================================================================
+// User Management
+// =============================================================================
+var currentUserService = 'mysql';
+
+function switchUserService(svc) {
+    currentUserService = svc;
+    document.querySelectorAll('.svc-tab').forEach(function(b) { b.classList.remove('active'); });
+    document.querySelector('.svc-tab[data-svc="' + svc + '"]').classList.add('active');
+    loadServiceUsers();
+}
+
+function loadServiceUsers() {
+    var container = document.getElementById('users-list');
+    container.innerHTML = '<div class="loading">Chargement des utilisateurs ' + currentUserService + '...</div>';
+
+    // Use different endpoint for MidPoint
+    var apiUrl = currentUserService === 'midpoint' ? '/api/midpoint/users' : '/api/users/' + currentUserService;
+
+    fetch(apiUrl).then(function(r) {
+        // Check if response is OK and has JSON content-type
+        var contentType = r.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error('Le serveur n\'a pas retourne de JSON. MidPoint est-il accessible?');
+        }
+        return r.json();
+    }).then(function(data) {
+        if (data.status === 'error') {
+            container.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>';
+            return;
+        }
+        if (!data.users || data.users.length === 0) {
+            container.innerHTML = '<div class="connector-card"><div class="connector-info"><h3>Aucun utilisateur</h3></div></div>';
+            return;
+        }
+        var html = '<table class="user-table"><thead><tr>';
+        if (currentUserService === 'midpoint') {
+            html += '<th>Username</th><th>Nom Complet</th><th>Email</th><th>Actions</th>';
+        } else if (currentUserService === 'mysql') {
+            html += '<th>Username</th><th>Host</th><th>Actions</th>';
+        } else if (currentUserService === 'postgresql') {
+            html += '<th>Username</th><th>Login</th><th>Roles</th><th>Actions</th>';
+        } else if (currentUserService === 'ldap') {
+            html += '<th>Username</th><th>CN</th><th>Email</th><th>Groupes</th><th>Actions</th>';
+        } else if (currentUserService === 'odoo') {
+            html += '<th>Login</th><th>Nom</th><th>Email</th><th>Actif</th><th>Actions</th>';
+        }
+        html += '</tr></thead><tbody>';
+
+        // Store users data for later use
+        window.usersData = {};
+        data.users.forEach(function(u, idx) {
+            // MidPoint uses 'name' instead of 'username'
+            var username = u.username || u.name || '';
+            window.usersData[username] = u;
+            html += '<tr>';
+            if (currentUserService === 'midpoint') {
+                html += '<td>' + escapeXml(username) + '</td>';
+                html += '<td>' + escapeXml(u.fullName || '') + '</td>';
+                html += '<td>' + escapeXml(u.email || '') + '</td>';
+                html += '<td class="user-actions">';
+                html += '<button class="btn-sm btn-success" onclick="openAssignRoleModal(\'' + escapeXml(username) + '\')" title="Assigner un role">+ Role</button>';
+                html += '</td>';
+            } else if (currentUserService === 'mysql') {
+                html += '<td>' + escapeXml(u.username) + '</td>';
+                html += '<td>' + escapeXml(u.host || '%') + '</td>';
+                html += '<td class="user-actions">';
+                html += '<button class="btn-sm btn-edit" onclick="openEditUserModal(\'' + escapeXml(u.username) + '\')" title="Modifier">&#9881;</button>';
+                html += '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escapeXml(u.username) + '\')">Supprimer</button></td>';
+            } else if (currentUserService === 'postgresql') {
+                html += '<td>' + escapeXml(u.username) + '</td>';
+                html += '<td>' + (u.can_login ? 'Oui' : 'Non') + '</td>';
+                html += '<td>' + (u.roles && u.roles.length > 0 ? escapeXml(u.roles.join(', ')) : '-') + '</td>';
+                html += '<td class="user-actions">';
+                html += '<button class="btn-sm btn-edit" onclick="openEditUserModal(\'' + escapeXml(u.username) + '\')" title="Modifier">&#9881;</button>';
+                html += '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escapeXml(u.username) + '\')">Supprimer</button></td>';
+            } else if (currentUserService === 'ldap') {
+                html += '<td>' + escapeXml(u.username) + '</td>';
+                html += '<td>' + escapeXml(u.cn || '') + '</td>';
+                html += '<td>' + escapeXml(u.email || '') + '</td>';
+                // Afficher les groupes LDAP
+                html += '<td><div class="group-badges">';
+                if (u.groups && u.groups.length > 0) {
+                    u.groups.forEach(function(g) { html += '<span class="group-badge">' + escapeXml(g) + '</span>'; });
+                } else {
+                    html += '<span style="color:#666;">-</span>';
+                }
+                html += '</div></td>';
+                html += '<td class="user-actions">';
+                html += '<button class="btn-sm btn-edit" onclick="openEditUserModal(\'' + escapeXml(u.username) + '\')" title="Modifier">&#9881;</button>';
+                html += '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escapeXml(u.username) + '\')">Supprimer</button></td>';
+            } else if (currentUserService === 'odoo') {
+                html += '<td>' + escapeXml(u.username) + '</td>';
+                html += '<td>' + escapeXml(u.name || '') + '</td>';
+                html += '<td>' + escapeXml(u.email || '') + '</td>';
+                html += '<td>' + (u.active ? '<span class="status-badge online">Actif</span>' : '<span class="status-badge offline">Archive</span>') + '</td>';
+                html += '<td class="user-actions">';
+                html += '<button class="btn-sm btn-edit" onclick="openEditUserModal(\'' + escapeXml(u.username) + '\')" title="Modifier">&#9881;</button>';
+                html += '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escapeXml(u.username) + '\')">Supprimer</button></td>';
+            }
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }).catch(function(e) {
+        container.innerHTML = '<div class="error">Erreur: ' + escapeXml(e.message) + '</div>';
+    });
+}
+
+function openCreateUserModal() {
+    // For MidPoint, use special modal
+    if (currentUserService === 'midpoint') {
+        openMidpointCreateModal();
+        return;
+    }
+
+    document.getElementById('create-modal-service').textContent = currentUserService.toUpperCase();
+    document.getElementById('create-user-error').style.display = 'none';
+    document.getElementById('create-user-success').style.display = 'none';
+    document.getElementById('new-username').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('new-email').value = '';
+    document.getElementById('new-fullname').value = '';
+    document.getElementById('new-lastname').value = '';
+
+    // Show/hide fields based on service
+    var showFullname = (currentUserService === 'ldap' || currentUserService === 'odoo');
+    document.getElementById('create-fullname-group').style.display = showFullname ? 'block' : 'none';
+    document.getElementById('create-lastname-group').style.display = (currentUserService === 'ldap') ? 'block' : 'none';
+
+    // Load roles
+    loadCreateRoles();
+    document.getElementById('create-user-modal').classList.add('active');
+}
+
+function loadCreateRoles() {
+    var container = document.getElementById('create-roles-container');
+    container.innerHTML = '<div class="loading">Chargement...</div>';
+    fetch('/api/roles/' + currentUserService).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'error') {
+            container.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>';
+            return;
+        }
+        if (!data.roles || data.roles.length === 0) {
+            container.innerHTML = '<p style="color:#888;">Aucun role disponible</p>';
+            return;
+        }
+        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo');
+        var html = '<div class="role-checkboxes">';
+        data.roles.forEach(function(r, i) {
+            if (isMulti) {
+                html += '<label class="role-checkbox-item"><input type="checkbox" name="create-role" value="' + escapeXml(r.id) + '"> ' + escapeXml(r.name) + '</label>';
+            } else {
+                html += '<label class="role-checkbox-item"><input type="radio" name="create-role" value="' + escapeXml(r.id) + '"' + (i === 0 ? ' checked' : '') + '> ' + escapeXml(r.name) + '</label>';
+            }
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }).catch(function(e) {
+        container.innerHTML = '<div class="error">Erreur: ' + escapeXml(e.message) + '</div>';
+    });
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+}
+
+function createUser() {
+    var username = document.getElementById('new-username').value.trim();
+    var password = document.getElementById('new-password').value;
+    var email = document.getElementById('new-email').value.trim();
+    var errDiv = document.getElementById('create-user-error');
+    var successDiv = document.getElementById('create-user-success');
+    errDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    if (!username) { errDiv.textContent = "Le nom d'utilisateur est requis"; errDiv.style.display = 'block'; return; }
+    if (!password && currentUserService !== 'odoo') { errDiv.textContent = 'Le mot de passe est requis'; errDiv.style.display = 'block'; return; }
+
+    // Collect selected roles
+    var roles = [];
+    var inputs = document.querySelectorAll('input[name="create-role"]');
+    inputs.forEach(function(inp) {
+        if (inp.checked) roles.push(inp.value);
+    });
+
+    var payload = {
+        username: username,
+        password: password,
+        email: email,
+        roles: roles,
+        fullName: document.getElementById('new-fullname').value.trim() || username,
+        lastName: document.getElementById('new-lastname').value.trim() || username,
+    };
+
+    fetch('/api/users/' + currentUserService, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'ok') {
+            var msg = data.message;
+            if (data.pending_approval) {
+                msg += ' (en attente d\'approbation)';
+            }
+            successDiv.textContent = msg;
+            successDiv.style.display = 'block';
+            setTimeout(function() {
+                closeModal('create-user-modal');
+                loadServiceUsers();
+            }, 2000);
+        } else {
+            errDiv.textContent = data.message;
+            errDiv.style.display = 'block';
+        }
+    }).catch(function(e) {
+        errDiv.textContent = 'Erreur: ' + e.message;
+        errDiv.style.display = 'block';
+    });
+}
+
+function deleteUser(username) {
+    if (!confirm('Supprimer l\'utilisateur "' + username + '" de ' + currentUserService.toUpperCase() + ' ?')) return;
+    fetch('/api/users/' + currentUserService + '/' + encodeURIComponent(username), {
+        method: 'DELETE',
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'ok') {
+            if (data.pending_approval) {
+                alert('Demande de suppression envoyee au workflow d\'approbation');
+            }
+            loadServiceUsers();
+        } else {
+            alert('Erreur: ' + data.message);
+        }
+    }).catch(function(e) {
+        alert('Erreur: ' + e.message);
+    });
+}
+
+// =============================================================================
+// Edit User Functions
+// =============================================================================
+var editingUser = null;
+
+function openEditUserModal(username) {
+    // Get user data from global store
+    var userData = window.usersData[username] || {};
+    editingUser = { username: username, data: userData };
+
+    document.getElementById('edit-modal-service').textContent = currentUserService.toUpperCase();
+    document.getElementById('edit-user-error').style.display = 'none';
+    document.getElementById('edit-user-success').style.display = 'none';
+    document.getElementById('edit-username').value = username;
+    document.getElementById('edit-password').value = '';
+    document.getElementById('edit-email').value = userData.email || '';
+    document.getElementById('edit-fullname').value = userData.cn || userData.name || userData.fullName || '';
+    document.getElementById('edit-lastname').value = userData.lastName || '';
+
+    // Show/hide fields based on service
+    var showFullname = (currentUserService === 'ldap' || currentUserService === 'odoo');
+    document.getElementById('edit-fullname-group').style.display = showFullname ? 'block' : 'none';
+    document.getElementById('edit-lastname-group').style.display = (currentUserService === 'ldap') ? 'block' : 'none';
+
+    // Load roles and pre-select current ones
+    loadEditRoles(userData);
+    document.getElementById('edit-user-modal').classList.add('active');
+}
+
+function loadEditRoles(userData) {
+    var container = document.getElementById('edit-roles-container');
+    var currentRolesDiv = document.getElementById('edit-current-roles');
+    container.innerHTML = '<div class="loading">Chargement...</div>';
+
+    // Determiner quels roles/groupes sont deja assignes
+    var currentRoles = [];
+    if (currentUserService === 'ldap' && userData.groups) {
+        currentRoles = userData.groups;
+    } else if (userData.roles) {
+        currentRoles = userData.roles;
+    }
+
+    // Afficher les roles actuels sous forme de badges
+    if (currentRoles.length > 0) {
+        var badgesHtml = '<div class="group-badges">';
+        currentRoles.forEach(function(role) {
+            badgesHtml += '<span class="group-badge" style="margin-right:5px;background:#333;padding:4px 10px;border-radius:12px;font-size:12px;">' + escapeXml(role) + '</span>';
+        });
+        badgesHtml += '</div>';
+        currentRolesDiv.innerHTML = badgesHtml;
+    } else {
+        currentRolesDiv.innerHTML = '<span style="color:#666;">Aucun role assigne</span>';
+    }
+
+    // Stocker les roles actuels pour la mise a jour
+    window.editCurrentRoles = currentRoles;
+
+    fetch('/api/roles/' + currentUserService).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'error') {
+            container.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>';
+            return;
+        }
+        if (!data.roles || data.roles.length === 0) {
+            container.innerHTML = '<p style="color:#888;">Aucun role disponible</p>';
+            return;
+        }
+
+        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo');
+
+        if (isMulti) {
+            // Pour LDAP et Odoo: liste deroulante multi-select avec checkboxes
+            var html = '<select id="edit-role-select" class="form-select" multiple style="height:150px;">';
+            data.roles.forEach(function(r) {
+                var isSelected = false;
+                if (currentUserService === 'ldap') {
+                    isSelected = currentRoles.some(function(g) { return g === r.name || r.id.toLowerCase().indexOf(g.toLowerCase()) !== -1; });
+                } else {
+                    isSelected = currentRoles.indexOf(r.id) !== -1 || currentRoles.indexOf(r.name) !== -1;
+                }
+                html += '<option value="' + escapeXml(r.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeXml(r.name) + '</option>';
+            });
+            html += '</select>';
+            html += '<p style="color:#888;font-size:11px;margin-top:5px;">Maintenez Ctrl pour selectionner plusieurs elements</p>';
+            container.innerHTML = html;
+        } else {
+            // Pour MySQL et PostgreSQL: liste deroulante simple
+            var html = '<select id="edit-role-select" class="form-select">';
+            data.roles.forEach(function(r, i) {
+                var isSelected = currentRoles.indexOf(r.id) !== -1 || currentRoles.indexOf(r.name) !== -1;
+                html += '<option value="' + escapeXml(r.id) + '"' + (isSelected || (i === 0 && currentRoles.length === 0) ? ' selected' : '') + '>' + escapeXml(r.name) + '</option>';
+            });
+            html += '</select>';
+            container.innerHTML = html;
+        }
+    }).catch(function(e) {
+        container.innerHTML = '<div class="error">Erreur: ' + escapeXml(e.message) + '</div>';
+    });
+}
+
+function updateUser() {
+    if (!editingUser) return;
+
+    var username = editingUser.username;
+    var password = document.getElementById('edit-password').value;
+    var email = document.getElementById('edit-email').value.trim();
+    var errDiv = document.getElementById('edit-user-error');
+    var successDiv = document.getElementById('edit-user-success');
+    errDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    // Collect selected roles from dropdown
+    var roles = [];
+    var selectEl = document.getElementById('edit-role-select');
+    if (selectEl) {
+        for (var i = 0; i < selectEl.options.length; i++) {
+            if (selectEl.options[i].selected) {
+                roles.push(selectEl.options[i].value);
+            }
+        }
+    }
+
+    var payload = {
+        email: email,
+    };
+
+    // Only add password if provided
+    if (password) {
+        payload.password = password;
+    }
+
+    // Add service-specific fields
+    if (currentUserService === 'mysql') {
+        payload.mysqlRole = roles[0] || 'readonly';
+    } else if (currentUserService === 'postgresql') {
+        payload.postgresqlRole = roles[0] || 'readonly';
+    } else if (currentUserService === 'ldap') {
+        payload.fullName = document.getElementById('edit-fullname').value.trim();
+        payload.lastName = document.getElementById('edit-lastname').value.trim();
+        payload.ldapGroups = roles;
+    } else if (currentUserService === 'odoo') {
+        payload.fullName = document.getElementById('edit-fullname').value.trim();
+        payload.odooGroups = roles;
+    }
+
+    fetch('/api/users/' + currentUserService + '/' + encodeURIComponent(username), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'ok') {
+            successDiv.textContent = data.message;
+            successDiv.style.display = 'block';
+            setTimeout(function() {
+                closeModal('edit-user-modal');
+                loadServiceUsers();
+            }, 1500);
+        } else {
+            errDiv.textContent = data.message;
+            errDiv.style.display = 'block';
+        }
+    }).catch(function(e) {
+        errDiv.textContent = 'Erreur: ' + e.message;
+        errDiv.style.display = 'block';
+    });
+}
+
+// =============================================================================
+// Assign User Functions (add existing user to service)
+// =============================================================================
+
+function openAssignUserModal() {
+    document.getElementById('assign-modal-service').textContent = currentUserService.toUpperCase();
+    document.getElementById('assign-user-error').style.display = 'none';
+    document.getElementById('assign-user-success').style.display = 'none';
+    document.getElementById('assign-username').value = '';
+    document.getElementById('assign-password').value = '';
+    document.getElementById('assign-email').value = '';
+    document.getElementById('assign-fullname').value = '';
+    document.getElementById('assign-lastname').value = '';
+
+    // Show/hide fields based on service
+    var showFullname = (currentUserService === 'ldap' || currentUserService === 'odoo');
+    document.getElementById('assign-fullname-group').style.display = showFullname ? 'block' : 'none';
+    document.getElementById('assign-lastname-group').style.display = (currentUserService === 'ldap') ? 'block' : 'none';
+
+    // Load roles
+    loadAssignRoles();
+    document.getElementById('assign-user-modal').classList.add('active');
+}
+
+function loadAssignRoles() {
+    var container = document.getElementById('assign-roles-container');
+    container.innerHTML = '<div class="loading">Chargement...</div>';
+    fetch('/api/roles/' + currentUserService).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'error') {
+            container.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>';
+            return;
+        }
+        if (!data.roles || data.roles.length === 0) {
+            container.innerHTML = '<p style="color:#888;">Aucun role disponible</p>';
+            return;
+        }
+        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo');
+        var html = '<div class="role-checkboxes">';
+        data.roles.forEach(function(r, i) {
+            if (isMulti) {
+                html += '<label class="role-checkbox-item"><input type="checkbox" name="assign-role" value="' + escapeXml(r.id) + '"> ' + escapeXml(r.name) + '</label>';
+            } else {
+                html += '<label class="role-checkbox-item"><input type="radio" name="assign-role" value="' + escapeXml(r.id) + '"' + (i === 0 ? ' checked' : '') + '> ' + escapeXml(r.name) + '</label>';
+            }
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }).catch(function(e) {
+        container.innerHTML = '<div class="error">Erreur: ' + escapeXml(e.message) + '</div>';
+    });
+}
+
+function assignUser() {
+    var username = document.getElementById('assign-username').value.trim();
+    var password = document.getElementById('assign-password').value;
+    var email = document.getElementById('assign-email').value.trim();
+    var errDiv = document.getElementById('assign-user-error');
+    var successDiv = document.getElementById('assign-user-success');
+    errDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    if (!username) { errDiv.textContent = "Le nom d'utilisateur est requis"; errDiv.style.display = 'block'; return; }
+    if (!password && currentUserService !== 'odoo') { errDiv.textContent = 'Le mot de passe est requis'; errDiv.style.display = 'block'; return; }
+
+    // Collect selected roles
+    var roles = [];
+    var inputs = document.querySelectorAll('input[name="assign-role"]');
+    inputs.forEach(function(inp) {
+        if (inp.checked) roles.push(inp.value);
+    });
+
+    var payload = {
+        username: username,
+        password: password,
+        email: email,
+        roles: roles,
+        fullName: document.getElementById('assign-fullname').value.trim() || username,
+        lastName: document.getElementById('assign-lastname').value.trim() || username,
+    };
+
+    // Use CREATE to add user to this service (will go through approval)
+    fetch('/api/users/' + currentUserService, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'ok') {
+            var msg = data.message;
+            if (data.pending_approval) {
+                msg += ' (en attente d\'approbation)';
+            }
+            successDiv.textContent = msg;
+            successDiv.style.display = 'block';
+            setTimeout(function() {
+                closeModal('assign-user-modal');
+                loadServiceUsers();
+            }, 2000);
+        } else {
+            errDiv.textContent = data.message;
+            errDiv.style.display = 'block';
+        }
+    }).catch(function(e) {
+        errDiv.textContent = 'Erreur: ' + e.message;
+        errDiv.style.display = 'block';
+    });
+}
+
+// =============================================================================
+// MidPoint Functions
+// =============================================================================
+var midpointAssignUsername = null;
+
+function openAssignRoleModal(username) {
+    midpointAssignUsername = username;
+    document.getElementById('midpoint-role-username').textContent = username;
+    document.getElementById('midpoint-role-error').style.display = 'none';
+    document.getElementById('midpoint-role-success').style.display = 'none';
+    loadMidpointRolesForAssign();
+    document.getElementById('midpoint-role-modal').classList.add('active');
+}
+
+function loadMidpointRolesForAssign() {
+    var container = document.getElementById('midpoint-roles-container');
+    container.innerHTML = '<div class="loading">Chargement...</div>';
+    fetch('/api/midpoint/roles').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'error') {
+            container.innerHTML = '<div class="error">' + escapeXml(data.message) + '</div>';
+            return;
+        }
+        if (!data.roles || data.roles.length === 0) {
+            container.innerHTML = '<p style="color:#888;">Aucun role disponible dans MidPoint</p>';
+            return;
+        }
+        var html = '<div class="role-checkboxes">';
+        data.roles.forEach(function(r, i) {
+            html += '<label class="role-checkbox-item"><input type="radio" name="midpoint-role" value="' + escapeXml(r.oid) + '"' + (i === 0 ? ' checked' : '') + '> ' + escapeXml(r.name) + '</label>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }).catch(function(e) {
+        container.innerHTML = '<div class="error">Erreur: ' + escapeXml(e.message) + '</div>';
+    });
+}
+
+function assignMidpointRole() {
+    if (!midpointAssignUsername) return;
+    var errDiv = document.getElementById('midpoint-role-error');
+    var successDiv = document.getElementById('midpoint-role-success');
+    var assignBtn = document.querySelector('#midpoint-role-modal .generate-btn');
+    errDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    var roleOid = null;
+    var inputs = document.querySelectorAll('input[name="midpoint-role"]');
+    inputs.forEach(function(inp) {
+        if (inp.checked) roleOid = inp.value;
+    });
+
+    if (!roleOid) {
+        errDiv.textContent = 'Veuillez selectionner un role';
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    // Disable button to prevent double submission
+    assignBtn.disabled = true;
+    assignBtn.textContent = 'Assignation en cours...';
+
+    fetch('/api/midpoint/users/' + encodeURIComponent(midpointAssignUsername) + '/roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roleOid: roleOid }),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        assignBtn.disabled = false;
+        assignBtn.textContent = 'Assigner';
+        if (data.status === 'ok') {
+            successDiv.textContent = data.message;
+            successDiv.style.display = 'block';
+            setTimeout(function() {
+                closeModal('midpoint-role-modal');
+                loadServiceUsers();
+            }, 1500);
+        } else {
+            errDiv.textContent = data.message;
+            errDiv.style.display = 'block';
+        }
+    }).catch(function(e) {
+        assignBtn.disabled = false;
+        assignBtn.textContent = 'Assigner';
+        errDiv.textContent = 'Erreur: ' + e.message;
+        errDiv.style.display = 'block';
+    });
+}
+
+function openMidpointCreateModal() {
+    document.getElementById('midpoint-create-error').style.display = 'none';
+    document.getElementById('midpoint-create-success').style.display = 'none';
+    document.getElementById('midpoint-new-username').value = '';
+    document.getElementById('midpoint-new-password').value = '';
+    document.getElementById('midpoint-new-email').value = '';
+    document.getElementById('midpoint-new-fullname').value = '';
+    document.getElementById('midpoint-new-givenname').value = '';
+    document.getElementById('midpoint-new-familyname').value = '';
+    document.getElementById('midpoint-create-modal').classList.add('active');
+}
+
+function createMidpointUser() {
+    var username = document.getElementById('midpoint-new-username').value.trim();
+    var password = document.getElementById('midpoint-new-password').value;
+    var email = document.getElementById('midpoint-new-email').value.trim();
+    var fullName = document.getElementById('midpoint-new-fullname').value.trim();
+    var givenName = document.getElementById('midpoint-new-givenname').value.trim();
+    var familyName = document.getElementById('midpoint-new-familyname').value.trim();
+    var errDiv = document.getElementById('midpoint-create-error');
+    var successDiv = document.getElementById('midpoint-create-success');
+    var createBtn = document.querySelector('#midpoint-create-modal .generate-btn');
+    errDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    if (!username) { errDiv.textContent = "Le nom d'utilisateur est requis"; errDiv.style.display = 'block'; return; }
+    if (!password) { errDiv.textContent = 'Le mot de passe est requis'; errDiv.style.display = 'block'; return; }
+
+    // Disable button to prevent double submission
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creation en cours...';
+
+    fetch('/api/midpoint/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            username: username,
+            password: password,
+            email: email,
+            fullName: fullName || username,
+            givenName: givenName,
+            familyName: familyName,
+        }),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Creer';
+        if (data.status === 'ok') {
+            successDiv.textContent = data.message;
+            successDiv.style.display = 'block';
+            setTimeout(function() {
+                closeModal('midpoint-create-modal');
+                loadServiceUsers();
+            }, 1500);
+        } else {
+            errDiv.textContent = data.message;
+            errDiv.style.display = 'block';
+        }
+    }).catch(function(e) {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Creer';
+        errDiv.textContent = 'Erreur: ' + e.message;
+        errDiv.style.display = 'block';
+    });
+}
+
+loadGatewayConnectors();
+</script>
+</body>
+</html>

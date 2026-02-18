@@ -1,0 +1,53 @@
+# Gateway IAM - API & Consumer Dockerfile
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PRISMA_BINARY_CACHE_DIR=/app/.prisma-cache
+
+# Set work directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir 'pydantic[email]'
+
+# Copy application code
+COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY prisma/ ./prisma/
+COPY data/ ./data/
+
+# Generate Prisma client (binaries cached in /app/.prisma-cache via PRISMA_BINARY_CACHE_DIR)
+RUN prisma generate
+
+# Create non-root user and transfer ownership of /app (includes .prisma-cache)
+RUN adduser --disabled-password --gecos '' appuser && \
+    chown -R appuser:appuser /app
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check (only relevant for API mode)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Default: API mode
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["api"]

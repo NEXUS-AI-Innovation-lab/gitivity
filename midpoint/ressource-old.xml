@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+          oid="736ea741-2c73-4478-b5d1-07d84cdf860f">
+
+    <name>Test RabbitMQ v2</name>
+
+    <connectorRef type="c:ConnectorType">
+        <filter>
+            <q:text>connectorType = "lu.lns.connector.restgateway.RestGatewayConnector"</q:text>
+        </filter>
+    </connectorRef>
+
+    <connectorConfiguration xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
+        <icfc:configurationProperties xmlns:gen="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/lu.lns.connector.restgateway/lu.lns.connector.restgateway.RestGatewayConnector">
+            <gen:useRabbitmq>true</gen:useRabbitmq>
+            <gen:rabbitmqHost>172.17.0.1</gen:rabbitmqHost>
+            <gen:rabbitmqPort>5672</gen:rabbitmqPort>
+            <gen:rabbitmqUsername>admin</gen:rabbitmqUsername>
+            <gen:rabbitmqPassword>admin123</gen:rabbitmqPassword>
+            <gen:rabbitmqQueue>midpoint-operations</gen:rabbitmqQueue>
+            <gen:gatewayUrl>http://localhost:5100</gen:gatewayUrl>
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+
+    <schemaHandling>
+        <objectType>
+            <kind>account</kind>
+            <intent>default</intent>
+            <default>true</default>
+            <objectClass>ri:AccountObjectClass</objectClass>
+
+            <attribute>
+                <ref>icfs:name</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/name</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:description</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/description</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:fullName</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/fullName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:firstName</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/givenName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:lastName</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/familyName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:additionalName</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/additionalName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:nickname</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/nickName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:honorificPrefix</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/honorificPrefix</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:honorificSuffix</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/honorificSuffix</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:title</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/title</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:preferredLanguage</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/preferredLanguage</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:locale</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/locale</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:timezone</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/timezone</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:email</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/emailAddress</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:telephoneNumber</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/telephoneNumber</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:costCenter</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/costCenter</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:organization</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>
+                            return focus?.organization?.size() > 0 ? focus.organization[0]?.orig : null
+                            </code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:organizationalUnit</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>
+                            return focus?.organizationalUnit?.size() > 0 ? focus.organizationalUnit[0]?.orig : null
+                            </code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:locality</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>$focus/locality</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:enabled</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>
+                            import com.evolveum.midpoint.xml.ns._public.common.common_3.ActivationStatusType
+                            return focus?.activation?.administrativeStatus == ActivationStatusType.ENABLED
+                            </code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:roles</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>
+                            import com.evolveum.midpoint.xml.ns._public.common.common_3.RoleType
+                            
+                            def roleNames = []
+                            focus?.assignment?.each { assignment ->
+                                if (assignment.targetRef?.type?.localPart == 'RoleType') {
+                                    def role = midpoint.resolveReferenceIfExists(assignment.targetRef)
+                                    if (role != null) {
+                                        roleNames.add(role.name?.orig)
+                                    }
+                                }
+                            }
+                            return roleNames
+                            </code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:ldapGroups</ref>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>
+                            import com.evolveum.midpoint.xml.ns._public.common.common_3.RoleType
+                            
+                            def ldapGroups = []
+                            def roleToLdapGroup = [
+                                'Developer': 'cn=Developers,ou=Groups,dc=example,dc=com',
+                                'Admin': 'cn=Admins,ou=Groups,dc=example,dc=com',
+                                'Manager': 'cn=Managers,ou=Groups,dc=example,dc=com',
+                                'User': 'cn=Users,ou=Groups,dc=example,dc=com'
+                            ]
+                            
+                            focus?.assignment?.each { assignment ->
+                                if (assignment.targetRef?.type?.localPart == 'RoleType') {
+                                    def role = midpoint.resolveReferenceIfExists(assignment.targetRef)
+                                    if (role != null) {
+                                        def roleName = role.name?.orig
+                                        if (roleToLdapGroup.containsKey(roleName)) {
+                                            ldapGroups.add(roleToLdapGroup[roleName])
+                                        }
+                                    }
+                                }
+                            }
+                            return ldapGroups
+                            </code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+
+            <activation>
+                <administrativeStatus>
+                    <outbound>
+                        <strength>strong</strength>
+                    </outbound>
+                </administrativeStatus>
+            </activation>
+
+            <credentials>
+                <password>
+                    <outbound>
+                        <strength>strong</strength>
+                    </outbound>
+                </password>
+            </credentials>
+        </objectType>
+    </schemaHandling>
+
+</resource>

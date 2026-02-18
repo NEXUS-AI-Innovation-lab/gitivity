@@ -1,0 +1,23 @@
+# Gateway HTTP - Flask entitlements server for MidPoint
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir flask ldap3
+
+# Copy application files
+COPY gateway-http/gateway-http.py ./gateway-http.py
+COPY gateway-http/config.json ./config.json
+
+# Expose port
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
+
+CMD ["python", "gateway-http.py"]

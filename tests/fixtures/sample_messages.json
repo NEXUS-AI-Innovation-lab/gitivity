@@ -1,0 +1,117 @@
+{
+  "create_user_mysql": {
+    "request_id": "mp-req-001",
+    "operation_type": "CREATE_USER",
+    "target_service": "MYSQL",
+    "user_data": {
+      "username": "john.doe",
+      "email": "john.doe@example.com",
+      "first_name": "John",
+      "last_name": "Doe",
+      "password": "SecureP@ssw0rd!",
+      "roles": ["read", "write"],
+      "attributes": {
+        "department": "Engineering",
+        "employee_id": "EMP001",
+        "host": "%",
+        "database": "app_db"
+      }
+    },
+    "metadata": {
+      "source": "midpoint",
+      "priority": "normal",
+      "correlation_id": "corr-12345"
+    }
+  },
+  "create_user_postgresql": {
+    "request_id": "mp-req-002",
+    "operation_type": "CREATE_USER",
+    "target_service": "POSTGRESQL",
+    "user_data": {
+      "username": "jane.smith",
+      "email": "jane.smith@example.com",
+      "first_name": "Jane",
+      "last_name": "Smith",
+      "password": "AnotherSecureP@ss!",
+      "roles": ["readonly"],
+      "attributes": {
+        "department": "Analytics",
+        "can_login": true,
+        "database": "analytics_db"
+      }
+    },
+    "metadata": {
+      "source": "midpoint",
+      "priority": "high"
+    }
+  },
+  "create_user_odoo": {
+    "request_id": "mp-req-003",
+    "operation_type": "CREATE_USER",
+    "target_service": "ODOO",
+    "user_data": {
+      "username": "bob.wilson",
+      "email": "bob.wilson@example.com",
+      "first_name": "Bob",
+      "last_name": "Wilson",
+      "password": "OdooP@ss123!",
+      "roles": ["user", "sales"],
+      "attributes": {
+        "name": "Bob Wilson",
+        "phone": "+1234567890",
+        "lang": "en_US",
+        "tz": "UTC"
+      }
+    },
+    "metadata": {
+      "source": "midpoint"
+    }
+  },
+  "update_user": {
+    "request_id": "mp-req-004",
+    "operation_type": "UPDATE_USER",
+    "target_service": "MYSQL",
+    "user_data": {
+      "username": "john.doe",
+      "email": "john.doe.new@example.com",
+      "roles": ["read", "write", "admin"],
+      "attributes": {
+        "department": "DevOps"
+      }
+    },
+    "metadata": {
+      "source": "midpoint",
+      "reason": "role_change"
+    }
+  },
+  "delete_user": {
+    "request_id": "mp-req-005",
+    "operation_type": "DELETE_USER",
+    "target_service": "MYSQL",
+    "user_data": {
+      "username": "john.doe"
+    },
+    "metadata": {
+      "source": "midpoint",
+      "reason": "user_offboarding"
+    }
+  },
+  "invalid_missing_username": {
+    "request_id": "mp-req-bad-001",
+    "operation_type": "CREATE_USER",
+    "target_service": "MYSQL",
+    "user_data": {
+      "email": "nouser@example.com"
+    },
+    "metadata": {}
+  },
+  "invalid_unknown_service": {
+    "request_id": "mp-req-bad-002",
+    "operation_type": "CREATE_USER",
+    "target_service": "UNKNOWN_SERVICE",
+    "user_data": {
+      "username": "testuser"
+    },
+    "metadata": {}
+  }
+}

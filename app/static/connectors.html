@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gateway IAM - Connecteurs</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --border: #475569;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        /* Main content */
+        .main {
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .section {
+            margin-bottom: 2rem;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .section-title {
+            font-size: 1.125rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .badge {
+            background: var(--bg-card);
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+        }
+
+        /* Connector Grid */
+        .connector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+
+        .connector-card {
+            background: var(--bg-secondary);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .connector-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .connector-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .connector-name {
+            font-weight: 600;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .connector-type {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .connector-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .icon-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 0.5rem;
+            border: none;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: var(--border);
+            color: var(--text-primary);
+        }
+
+        /* Status indicator */
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .status-connected .status-dot { background: var(--success); }
+        .status-disconnected .status-dot { background: var(--error); }
+        .status-error .status-dot { background: var(--error); }
+        .status-unknown .status-dot { background: var(--warning); }
+
+        .status-connected { color: var(--success); }
+        .status-disconnected { color: var(--error); }
+        .status-error { color: var(--error); }
+        .status-unknown { color: var(--warning); }
+
+        /* Config preview */
+        .config-preview {
+            background: var(--bg-card);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            margin-top: 1rem;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .config-row:last-child {
+            border-bottom: none;
+        }
+
+        .config-key {
+            color: var(--text-secondary);
+        }
+
+        .config-value {
+            color: var(--text-primary);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: 1rem;
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+        }
+
+        .modal-header {
+            padding: 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 1.125rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .modal-body {
+            padding: 1.25rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .modal-footer {
+            padding: 1.25rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+        }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1100;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            background: var(--bg-secondary);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-width: 300px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .toast-success { border-left: 4px solid var(--success); }
+        .toast-error { border-left: 4px solid var(--error); }
+        .toast-warning { border-left: 4px solid var(--warning); }
+
+        /* Loading spinner */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+            gap: 1rem;
+        }
+
+        /* MidPoint unavailable banner */
+        .banner {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .banner-warning {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid var(--warning);
+            color: var(--warning);
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+            </svg>
+            Gateway IAM - Connecteurs
+        </h1>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="loadConnectors()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6"/>
+                    <path d="M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/>
+                    <path d="M20.49 15a9 9 0 01-14.85 3.36L1 14"/>
+                </svg>
+                Actualiser
+            </button>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Gateway Connectors -->
+        <section class="section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="8" rx="2"/>
+                        <rect x="2" y="14" width="20" height="8" rx="2"/>
+                        <circle cx="6" cy="6" r="1"/>
+                        <circle cx="6" cy="18" r="1"/>
+                    </svg>
+                    Connecteurs Gateway
+                    <span class="badge" id="gateway-count">0</span>
+                </h2>
+            </div>
+            <div class="connector-grid" id="gateway-connectors">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    Chargement...
+                </div>
+            </div>
+        </section>
+
+        <!-- MidPoint Connectors -->
+        <section class="section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                    Connecteurs MidPoint
+                    <span class="badge" id="midpoint-count">0</span>
+                </h2>
+            </div>
+            <div id="midpoint-banner"></div>
+            <div class="connector-grid" id="midpoint-connectors">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    Chargement...
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Config Modal -->
+    <div class="modal-overlay" id="config-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                    </svg>
+                    <span id="modal-title">Configuration</span>
+                </h2>
+                <button class="icon-btn" onclick="closeModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <!-- Dynamic form content -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+                <button class="btn btn-primary" id="modal-test-btn" onclick="testCurrentConnector()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                        <polyline points="22,4 12,14.01 9,11.01"/>
+                    </svg>
+                    Tester
+                </button>
+                <button class="btn btn-primary" id="modal-save-btn" onclick="saveConfig()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                        <polyline points="17,21 17,13 7,13 7,21"/>
+                        <polyline points="7,3 7,8 15,8"/>
+                    </svg>
+                    Sauvegarder
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let currentConnector = null;
+        let currentConnectorType = null;
+
+        // Load connectors on page load
+        document.addEventListener('DOMContentLoaded', loadConnectors);
+
+        async function loadConnectors() {
+            try {
+                const response = await fetch('/api/v1/connectors');
+                const data = await response.json();
+
+                renderGatewayConnectors(data.gateway_connectors);
+                renderMidPointConnectors(data.midpoint_connectors, data.midpoint_available);
+            } catch (error) {
+                showToast('Erreur lors du chargement des connecteurs', 'error');
+                console.error(error);
+            }
+        }
+
+        function renderGatewayConnectors(connectors) {
+            const container = document.getElementById('gateway-connectors');
+            document.getElementById('gateway-count').textContent = connectors.length;
+
+            if (connectors.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="2" width="20" height="8" rx="2"/>
+                            <rect x="2" y="14" width="20" height="8" rx="2"/>
+                        </svg>
+                        <p>Aucun connecteur Gateway configuré</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = connectors.map(c => createConnectorCard(c, 'gateway')).join('');
+        }
+
+        function renderMidPointConnectors(connectors, available) {
+            const container = document.getElementById('midpoint-connectors');
+            const banner = document.getElementById('midpoint-banner');
+            document.getElementById('midpoint-count').textContent = connectors.length;
+
+            if (!available) {
+                banner.innerHTML = `
+                    <div class="banner banner-warning">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        MidPoint n'est pas accessible. Vérifiez la configuration.
+                    </div>
+                `;
+                container.innerHTML = '';
+                return;
+            }
+
+            banner.innerHTML = '';
+
+            if (connectors.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 6v6l4 2"/>
+                        </svg>
+                        <p>Aucune ressource MidPoint trouvée</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = connectors.map(c => createConnectorCard(c, 'midpoint')).join('');
+        }
+
+        function createConnectorCard(connector, type) {
+            const statusClass = `status-${connector.status}`;
+            const statusText = {
+                'connected': 'Connecté',
+                'disconnected': 'Déconnecté',
+                'error': 'Erreur',
+                'unknown': 'Inconnu'
+            }[connector.status] || connector.status;
+
+            const id = type === 'midpoint' ? connector.oid : connector.name;
+            const configHtml = Object.entries(connector.config || {})
+                .slice(0, 4)
+                .map(([key, value]) => `
+                    <div class="config-row">
+                        <span class="config-key">${key}</span>
+                        <span class="config-value">${value}</span>
+                    </div>
+                `).join('');
+
+            return `
+                <div class="connector-card">
+                    <div class="connector-header">
+                        <div>
+                            <div class="connector-name">
+                                ${connector.name}
+                            </div>
+                            <div class="connector-type">
+                                ${type === 'midpoint' ? (connector.connector_type || 'MidPoint Resource') : 'Gateway Connector'}
+                            </div>
+                        </div>
+                        <div class="connector-actions">
+                            <button class="icon-btn" onclick="testConnector('${id}', '${type}')" title="Tester la connexion">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                                    <polyline points="22,4 12,14.01 9,11.01"/>
+                                </svg>
+                            </button>
+                            <button class="icon-btn" onclick="openConfig('${id}', '${type}')" title="Configuration">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"/>
+                                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="status ${statusClass}">
+                        <span class="status-dot"></span>
+                        ${statusText}
+                        ${connector.message ? `<span style="color: var(--text-secondary); font-size: 0.75rem;"> - ${connector.message}</span>` : ''}
+                    </div>
+                    ${configHtml ? `<div class="config-preview">${configHtml}</div>` : ''}
+                </div>
+            `;
+        }
+
+        async function testConnector(id, type) {
+            try {
+                showToast('Test en cours...', 'warning');
+
+                const url = type === 'midpoint'
+                    ? `/api/v1/connectors/midpoint/${id}/test`
+                    : `/api/v1/connectors/gateway/${id}/test`;
+
+                const response = await fetch(url, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`Connexion réussie (${result.latency_ms}ms)`, 'success');
+                } else {
+                    showToast(`Échec: ${result.message}`, 'error');
+                }
+
+                loadConnectors();
+            } catch (error) {
+                showToast('Erreur lors du test', 'error');
+            }
+        }
+
+        async function openConfig(id, type) {
+            currentConnector = id;
+            currentConnectorType = type;
+
+            try {
+                const url = type === 'midpoint'
+                    ? `/api/v1/connectors/midpoint/${id}`
+                    : `/api/v1/connectors/gateway/${id}`;
+
+                const response = await fetch(url);
+                const connector = await response.json();
+
+                document.getElementById('modal-title').textContent = `Configuration - ${connector.name}`;
+
+                // Show/hide save button based on type (MidPoint config is read-only for now)
+                document.getElementById('modal-save-btn').style.display = type === 'gateway' ? 'flex' : 'none';
+
+                // Generate form
+                const form = generateConfigForm(connector.config, type);
+                document.getElementById('modal-body').innerHTML = form;
+
+                document.getElementById('config-modal').classList.add('active');
+            } catch (error) {
+                showToast('Erreur lors du chargement de la configuration', 'error');
+            }
+        }
+
+        function generateConfigForm(config, type) {
+            if (type === 'midpoint') {
+                // Read-only view for MidPoint
+                return Object.entries(config)
+                    .map(([key, value]) => `
+                        <div class="form-group">
+                            <label>${key}</label>
+                            <input type="text" value="${typeof value === 'object' ? JSON.stringify(value) : value}" readonly style="opacity: 0.7;">
+                        </div>
+                    `).join('') + `
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 1rem;">
+                        La configuration MidPoint est en lecture seule. Utilisez l'interface MidPoint pour modifier.
+                    </p>
+                `;
+            }
+
+            // Editable form for Gateway connectors
+            return Object.entries(config)
+                .map(([key, value]) => `
+                    <div class="form-group">
+                        <label>${key}</label>
+                        <input type="${key.toLowerCase().includes('password') ? 'password' : 'text'}"
+                               name="${key}"
+                               value="${value}"
+                               placeholder="${key}">
+                    </div>
+                `).join('');
+        }
+
+        function closeModal() {
+            document.getElementById('config-modal').classList.remove('active');
+            currentConnector = null;
+            currentConnectorType = null;
+        }
+
+        async function testCurrentConnector() {
+            if (currentConnector && currentConnectorType) {
+                await testConnector(currentConnector, currentConnectorType);
+            }
+        }
+
+        async function saveConfig() {
+            if (!currentConnector || currentConnectorType !== 'gateway') return;
+
+            const form = document.getElementById('modal-body');
+            const inputs = form.querySelectorAll('input');
+            const config = {};
+
+            inputs.forEach(input => {
+                if (input.value) {
+                    config[input.name] = input.value;
+                }
+            });
+
+            try {
+                const response = await fetch(`/api/v1/connectors/gateway/${currentConnector}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+
+                if (response.ok) {
+                    showToast('Configuration mise à jour', 'success');
+                    closeModal();
+                    loadConnectors();
+                } else {
+                    showToast('Erreur lors de la sauvegarde', 'error');
+                }
+            } catch (error) {
+                showToast('Erreur lors de la sauvegarde', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    ${type === 'success' ? '<path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/>' : ''}
+                    ${type === 'error' ? '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>' : ''}
+                    ${type === 'warning' ? '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>' : ''}
+                </svg>
+                <span>${message}</span>
+            `;
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Close modal on overlay click
+        document.getElementById('config-modal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay')) closeModal();
+        });
+    </script>
+</body>
+</html>

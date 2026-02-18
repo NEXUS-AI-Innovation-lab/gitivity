@@ -1,0 +1,420 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # CORE INFRASTRUCTURE
+  # =============================================================================
+
+  # PostgreSQL - Gateway IAM Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: gitivity-postgres
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway_secret
+      POSTGRES_DB: gateway_iam
+    ports:
+      - "5430:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway -d gateway_iam"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gateway-network
+
+  # RabbitMQ - Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: gitivity-rabbitmq
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gateway-network
+
+  # Redis - Approval state tracking
+  redis:
+    image: redis:7-alpine
+    container_name: gitivity-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gateway-network
+
+  # =============================================================================
+  # CORE APPLICATION SERVICES
+  # =============================================================================
+
+  # Gateway API - FastAPI main orchestrator
+  gateway-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: gitivity-api
+    env_file: .env.docker
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - gateway-network
+
+  # Gateway Consumer - RabbitMQ message consumer (same image, different entrypoint)
+  gateway-consumer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: gitivity-consumer
+    env_file: .env.docker
+    command: ["consumer"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f start_consumer || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - gateway-network
+
+  # Gateway HTTP - Flask entitlements server for MidPoint
+  gateway-http:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway-http
+    container_name: gitivity-http
+    environment:
+      LDAP_HOST: ldap
+      LDAP_PORT: 10389
+    ports:
+      - "5100:5100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5100/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - gateway-network
+
+  # Approval Worker - Flask approval workflow simulator
+  approval-worker:
+    build:
+      context: ./approval_worker
+      dockerfile: Dockerfile
+    container_name: gitivity-approval-worker
+    environment:
+      GATEWAY_CALLBACK_URL: http://gateway-api:8100
+      SLEEP_DURATION: 5
+      WORKER_ID: flask-approval-worker-1
+      WORKER_PORT: 5101
+      LOG_LEVEL: INFO
+    ports:
+      - "5101:5101"
+    depends_on:
+      gateway-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5101/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - gateway-network
+
+  # n8n - Approval workflow automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: gitivity-n8n
+    environment:
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: Europe/Paris
+      TZ: Europe/Paris
+      DB_TYPE: sqlite
+      DB_SQLITE_DATABASE: /home/node/.n8n/database.sqlite
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: admin
+      N8N_BASIC_AUTH_PASSWORD: admin
+      N8N_SECURE_COOKIE: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 168
+      N8N_PAYLOAD_SIZE_MAX: 16
+      # Gmail SMTP (set in host .env or override)
+      N8N_EMAIL_MODE: smtp
+      N8N_SMTP_HOST: smtp.gmail.com
+      N8N_SMTP_PORT: 465
+      N8N_SMTP_USER: ${GMAIL_USER:-}
+      N8N_SMTP_PASS: ${GMAIL_APP_PASSWORD:-}
+      N8N_SMTP_SSL: "true"
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - gateway-network
+
+  # =============================================================================
+  # TARGET SERVICES (docker compose --profile targets up)
+  # =============================================================================
+
+  # LDAP - ApacheDS
+  ldap:
+    image: openmicroscopy/apacheds:0.7.0
+    container_name: gitivity-ldap
+    ports:
+      - "10389:10389"
+    networks:
+      - gateway-network
+    profiles:
+      - targets
+
+  # MySQL Target
+  mysql-target:
+    image: mysql:8.0
+    container_name: gitivity-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql_root_secret
+      MYSQL_DATABASE: target_db
+      MYSQL_USER: target_user
+      MYSQL_PASSWORD: target_secret
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_target_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmysql_root_secret"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gateway-network
+    profiles:
+      - targets
+
+  # PostgreSQL Target
+  postgresql-target:
+    image: postgres:15-alpine
+    container_name: gitivity-postgresql
+    environment:
+      POSTGRES_USER: target_user
+      POSTGRES_PASSWORD: target_secret
+      POSTGRES_DB: target_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgresql_target_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U target_user -d target_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gateway-network
+    profiles:
+      - targets
+
+  # Odoo Database
+  odoo-db:
+    image: postgres:15-alpine
+    container_name: gitivity-odoo-db
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo_secret
+      POSTGRES_DB: postgres
+    volumes:
+      - odoo_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gateway-network
+    profiles:
+      - targets
+
+  # Odoo ERP
+  odoo:
+    image: odoo:17
+    container_name: gitivity-odoo
+    depends_on:
+      odoo-db:
+        condition: service_healthy
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo_secret
+    ports:
+      - "8069:8069"
+    volumes:
+      - odoo_data:/var/lib/odoo
+      - odoo_addons:/mnt/extra-addons
+    networks:
+      - gateway-network
+    profiles:
+      - targets
+
+  # =============================================================================
+  # MIDPOINT IAM (docker compose --profile midpoint up)
+  # =============================================================================
+
+  midpoint_data:
+    image: postgres:16-alpine
+    environment:
+     - POSTGRES_PASSWORD=db.secret.pw.007
+     - POSTGRES_USER=midpoint
+     - POSTGRES_INITDB_ARGS=--lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+    networks:
+     - gateway-network
+    volumes:
+     - midpoint_data:/var/lib/postgresql/data
+    profiles:
+      - midpoint
+
+  data_init:
+    image: evolveum/midpoint:${MP_VER:-latest}-alpine
+    command: >
+      bash -c "
+      cd /opt/midpoint ;
+      bin/midpoint.sh init-native ;
+      echo ' - - - - - - ' ;
+      bin/ninja.sh -B info >/dev/null 2>/tmp/ninja.log ;
+      grep -q \"ERROR\" /tmp/ninja.log && (
+      bin/ninja.sh run-sql --create --mode REPOSITORY  ;
+      bin/ninja.sh run-sql --create --mode AUDIT
+      ) ||
+      echo -e '\\n Repository init is not needed...' ;
+      "
+    depends_on:
+     - midpoint_data
+    environment:
+     - MP_SET_midpoint_repository_jdbcUsername=midpoint
+     - MP_SET_midpoint_repository_jdbcPassword=db.secret.pw.007
+     - MP_SET_midpoint_repository_jdbcUrl=jdbc:postgresql://midpoint_data:5432/midpoint
+     - MP_SET_midpoint_repository_database=postgresql
+     - MP_INIT_CFG=/opt/midpoint/var
+    networks:
+     - gateway-network
+    volumes:
+     - midpoint_home:/opt/midpoint/var
+    profiles:
+      - midpoint
+
+  midpoint_server:
+    image: evolveum/midpoint:${MP_VER:-latest}-alpine
+    depends_on:
+      data_init:
+        condition: service_completed_successfully
+      midpoint_data:
+        condition: service_started
+    command: [ "/opt/midpoint/bin/midpoint.sh", "container" ]
+    ports:
+      - 8080:8080
+    environment:
+     - MP_SET_midpoint_repository_jdbcUsername=midpoint
+     - MP_SET_midpoint_repository_jdbcPassword=db.secret.pw.007
+     - MP_SET_midpoint_repository_jdbcUrl=jdbc:postgresql://midpoint_data:5432/midpoint
+     - MP_SET_midpoint_repository_database=postgresql
+     - MP_SET_midpoint_administrator_initialPassword=Test5ecr3t
+     - MP_UNSET_midpoint_repository_hibernateHbm2ddl=1
+     - MP_NO_ENV_COMPAT=1
+    networks:
+     - gateway-network
+    volumes:
+     - midpoint_home:/opt/midpoint/var
+    profiles:
+      - midpoint
+
+  # =============================================================================
+  # TESTING (docker compose --profile testing up)
+  # =============================================================================
+
+  # Mock n8n for automated testing
+  n8n-mock:
+    build:
+      context: ./docker/mock-n8n
+      dockerfile: Dockerfile
+    container_name: gitivity-n8n-mock
+    environment:
+      MOCK_MODE: auto-approve
+      MOCK_DELAY_MS: 0
+      MOCK_REJECT_RATE: 0.3
+    ports:
+      - "8101:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - gateway-network
+    profiles:
+      - testing
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:
+  n8n_data:
+  mysql_target_data:
+  postgresql_target_data:
+  odoo_db_data:
+  odoo_data:
+  odoo_addons:
+  midpoint_data:
+  midpoint_home:
+
+networks:
+  gateway-network:
+    driver: bridge

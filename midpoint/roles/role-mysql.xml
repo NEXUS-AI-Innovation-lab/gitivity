@@ -1,0 +1,28 @@
+<role oid="00000000-0000-0000-0000-000000000101"
+      xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+        xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3">
+    <name>mysql</name>
+    <description>Accès MySQL avec privilèges SELECT, INSERT, UPDATE</description>
+    <inducement>
+        <construction>
+            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="ResourceType"/>
+            <kind>account</kind>
+            <attribute>
+                <ref>ri:roles</ref>
+                <outbound>
+                    <expression>
+                        <value>mysql</value>
+                    </expression>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:mysqlGrants</ref>
+                <outbound>
+                    <expression>
+                        <value>SELECT, INSERT, UPDATE</value>
+                    </expression>
+                </outbound>
+            </attribute>
+        </construction>
+    </inducement>
+</role>

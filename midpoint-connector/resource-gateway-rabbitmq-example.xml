@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          oid="YOUR-RESOURCE-OID">
+
+    <name>Gateway RabbitMQ Resource</name>
+
+    <connectorRef type="ConnectorType">
+        <filter>
+            <q:text>connectorType = "lu.lns.connector.restgateway.RestGatewayConnector"</q:text>
+        </filter>
+    </connectorRef>
+
+    <!-- ========================================= -->
+    <!-- CONFIGURATION RABBITMQ - ICI ! -->
+    <!-- ========================================= -->
+    <connectorConfiguration xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
+        <icfc:configurationProperties xmlns:gen="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/lu.lns.connector.restgateway/lu.lns.connector.restgateway.RestGatewayConnector">
+
+            <!-- ✅ ACTIVER RABBITMQ -->
+            <gen:useRabbitmq>true</gen:useRabbitmq>
+
+            <!-- Configuration RabbitMQ -->
+            <gen:rabbitmqHost>172.17.0.1</gen:rabbitmqHost>
+            <gen:rabbitmqPort>5672</gen:rabbitmqPort>
+            <gen:rabbitmqUsername>admin</gen:rabbitmqUsername>
+            <gen:rabbitmqPassword>admin123</gen:rabbitmqPassword>
+            <gen:rabbitmqQueue>midpoint-operations</gen:rabbitmqQueue>
+
+            <!-- Anciennes propriétés HTTP (ignorées quand useRabbitmq=true) -->
+            <gen:gatewayUrl>http://localhost:5100</gen:gatewayUrl>
+            <gen:connectionTimeout>30000</gen:connectionTimeout>
+            <gen:requestTimeout>60000</gen:requestTimeout>
+            <gen:validateSsl>true</gen:validateSsl>
+
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+
+    <!-- Capabilities -->
+    <capabilities xmlns:cap="http://midpoint.evolveum.com/xml/ns/public/resource/capabilities-3">
+        <configured>
+            <cap:read>
+                <cap:enabled>false</cap:enabled>
+            </cap:read>
+            <cap:create>
+                <cap:enabled>true</cap:enabled>
+            </cap:create>
+            <cap:update>
+                <cap:enabled>true</cap:enabled>
+            </cap:update>
+            <cap:delete>
+                <cap:enabled>true</cap:enabled>
+            </cap:delete>
+        </configured>
+    </capabilities>
+
+    <!-- Schema Handling -->
+    <schemaHandling>
+        <objectType>
+            <kind>account</kind>
+            <intent>default</intent>
+            <displayName>Default Account</displayName>
+            <default>true</default>
+            <objectClass>ri:AccountObjectClass</objectClass>
+
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>Username</displayName>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>name</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:firstName</ref>
+                <displayName>First Name</displayName>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>givenName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:lastName</ref>
+                <displayName>Last Name</displayName>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>familyName</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:email</ref>
+                <displayName>Email</displayName>
+                <outbound>
+                    <strength>strong</strength>
+                    <source>
+                        <path>emailAddress</path>
+                    </source>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:enabled</ref>
+                <displayName>Enabled</displayName>
+                <outbound>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>
+                                import com.evolveum.midpoint.xml.ns._public.common.common_3.ActivationStatusType
+                                activation?.administrativeStatus == ActivationStatusType.ENABLED
+                            </code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+
+            <activation>
+                <administrativeStatus>
+                    <outbound>
+                        <strength>strong</strength>
+                    </outbound>
+                </administrativeStatus>
+            </activation>
+        </objectType>
+    </schemaHandling>
+
+    <!-- Synchronization -->
+    <synchronization>
+        <objectSynchronization>
+            <kind>account</kind>
+            <intent>default</intent>
+            <enabled>true</enabled>
+
+            <reaction>
+                <situation>linked</situation>
+                <synchronize>true</synchronize>
+            </reaction>
+
+            <reaction>
+                <situation>unlinked</situation>
+                <action>
+                    <handlerUri>http://midpoint.evolveum.com/xml/ns/public/model/action-3#link</handlerUri>
+                </action>
+            </reaction>
+        </objectSynchronization>
+    </synchronization>
+
+</resource>

@@ -1,0 +1,192 @@
+// Prisma schema for Gateway IAM
+
+generator client {
+  provider  = "prisma-client-py"
+  interface = "asyncio"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+
+enum OperationType {
+  CREATE_USER
+  UPDATE_USER
+  DELETE_USER
+  CREATE_ROLE
+  UPDATE_ROLE
+  DELETE_ROLE
+  ASSIGN_ROLE
+  REVOKE_ROLE
+}
+
+enum OperationStatus {
+  PENDING          // Initial state when message received
+  VALIDATING       // Calling n8n for validation
+  VALIDATED        // n8n approved the operation
+  APPROVAL_PENDING // Waiting for manual/automated approval
+  PROCESSING       // Provisioning to target service
+  SUCCESS          // Operation completed successfully
+  FAILED           // Operation failed (not retriable)
+  RETRYING         // Scheduled for retry
+  DLQ              // Sent to Dead Letter Queue (max retries exceeded)
+}
+
+enum TargetService {
+  MYSQL
+  POSTGRESQL
+  ODOO
+  LDAP
+}
+
+// Main Models
+
+model ProvisioningOperation {
+  id String @id @default(uuid())
+
+  // Message source tracking
+  midpoint_request_id String? @unique // ID from MidPoint
+  broker_message_id   String? @unique // ID from message broker
+
+  // Operation details
+  operation_type OperationType
+  target_service TargetService
+  status         OperationStatus @default(PENDING)
+
+  // Payload data
+  user_data        Json // Flexible user data from MidPoint
+  original_message Json // Complete MidPoint message for reference
+
+  // Validation tracking
+  validation_request_id String?
+  validation_response   Json?
+  validated_at          DateTime?
+
+  // Processing tracking
+  processing_started_at   DateTime?
+  processing_completed_at DateTime?
+  provisioning_result     Json? // Result from target service
+
+  // Retry logic
+  retry_count   Int       @default(0)
+  max_retries   Int       @default(3)
+  next_retry_at DateTime? // When to retry next
+
+  // Error handling
+  error_message    String?
+  error_stacktrace String?
+  sent_to_dlq_at   DateTime?
+
+  // Notification tracking
+  notification_sent    Boolean   @default(false)
+  notification_sent_at DateTime?
+
+  // Approval workflow tracking
+  approval_request_id   String?   // Unique ID for approval request
+  approval_requested_at DateTime? // When approval was requested
+  approval_response     Json?     // Full approval response from Flask worker
+  approved_at           DateTime? // When approved/rejected
+  approved_by           String?   // Identifier (e.g., "flask-worker", "manual-admin")
+  approval_reason       String?   // Reason for approval/rejection
+  approval_timeout_at   DateTime? // Auto-rejection timeout (optional future enhancement)
+
+  // Audit timestamps
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  audit_logs AuditLog[]
+
+  // Indexes for performance
+  @@index([status])
+  @@index([target_service])
+  @@index([created_at])
+  @@index([next_retry_at])
+  @@index([operation_type])
+}
+
+model AuditLog {
+  id String @id @default(uuid())
+
+  // Related operation
+  operation_id String
+  operation    ProvisioningOperation @relation(fields: [operation_id], references: [id], onDelete: Cascade)
+
+  // Event details
+  event_type String // e.g., "status_change", "validation_sent", "provisioning_started"
+  old_status OperationStatus?
+  new_status OperationStatus?
+
+  // Context and metadata
+  message  String?
+  metadata Json? // Additional structured data
+
+  // Actor information (for future auth system)
+  actor_type String? // "system", "user", "retry_manager", "api"
+  actor_id   String? // User ID or system identifier
+
+  created_at DateTime @default(now())
+
+  // Indexes
+  @@index([operation_id])
+  @@index([created_at])
+  @@index([event_type])
+}
+
+model DeadLetterQueue {
+  id String @id @default(uuid())
+
+  // Reference to failed operation
+  operation_id String? @unique
+
+  // Original message data
+  original_message  Json
+  broker_message_id String?
+
+  // Error context
+  error_type       String // Exception class name
+  error_message    String
+  error_stacktrace String?
+  retry_count      Int    // How many times it was retried
+
+  // Resolution tracking
+  resolved          Boolean   @default(false)
+  resolved_at       DateTime?
+  resolution_notes  String?
+  resolved_by       String? // User or system identifier
+
+  created_at DateTime @default(now())
+
+  // Indexes
+  @@index([resolved])
+  @@index([created_at])
+}
+
+model SystemMetrics {
+  id String @id @default(uuid())
+
+  // Metrics snapshot
+  total_operations      Int
+  pending_operations    Int
+  processing_operations Int
+  success_operations    Int
+  failed_operations     Int
+  dlq_count             Int
+
+  // Performance metrics
+  avg_processing_time_ms Int?
+  max_processing_time_ms Int?
+  min_processing_time_ms Int?
+
+  // Broker metrics
+  messages_consumed Int?
+  messages_failed   Int?
+
+  snapshot_at DateTime @default(now())
+
+  // Indexes
+  @@index([snapshot_at])
+}

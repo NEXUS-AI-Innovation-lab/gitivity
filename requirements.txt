@@ -1,0 +1,55 @@
+# Core Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# Database and ORM
+prisma
+asyncpg
+
+# Message Brokers
+aiokafka
+aio-pika
+
+# HTTP Client
+httpx
+
+# Redis (for approval workflow)
+redis[hiredis]>=5.0.1
+
+# Target Service Connectors
+# MySQL
+aiomysql
+PyMySQL
+cryptography  # Required for MySQL 8+ sha2_password authentication
+
+# PostgreSQL (asyncpg already listed above)
+
+# Odoo
+odoorpc
+
+# LDAP
+ldap3
+
+# Web Framework (approval_worker, connector-dashboard, connecteur)
+flask
+requests
+
+# RabbitMQ sync client (connecteur, scripts)
+pika
+
+# Utilities
+python-dotenv
+python-json-logger
+
+# Development and Testing
+pytest
+pytest-asyncio
+pytest-cov
+black
+ruff
+mypy
+
+# Type stubs
+types-python-dateutil
