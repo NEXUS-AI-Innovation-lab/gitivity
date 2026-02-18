@@ -79,7 +79,7 @@ class RabbitMQConsumer(BrokerConsumer):
     async def start(self) -> None:
         """Start consuming messages from RabbitMQ"""
         logger.info(
-            f"Starting RabbitMQ consumer",
+            "Starting RabbitMQ consumer",
             extra={
                 "host": settings.RABBITMQ_HOST,
                 "port": settings.RABBITMQ_PORT,
@@ -150,7 +150,7 @@ class RabbitMQConsumer(BrokerConsumer):
         """Callback for incoming messages"""
         async with message.process():
             logger.debug(
-                f"Received RabbitMQ message",
+                "Received RabbitMQ message",
                 extra={
                     "message_id": message.message_id,
                     "routing_key": message.routing_key,
@@ -162,7 +162,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 # Message will be auto-acked by context manager
 
                 logger.debug(
-                    f"Message processed and acknowledged",
+                    "Message processed and acknowledged",
                     extra={"message_id": message.message_id},
                 )
 
@@ -191,7 +191,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 operation_id = await self._orchestrator.process_message(midpoint_message)
 
                 logger.info(
-                    f"Message processed successfully",
+                    "Message processed successfully",
                     extra={
                         "operation_id": operation_id,
                         "request_id": midpoint_message.request_id,
@@ -505,7 +505,7 @@ class RabbitMQConsumer(BrokerConsumer):
             # Also check ldapGroups - if present, include LDAP
             if ldap_groups and TargetService.LDAP not in target_services:
                 target_services.append(TargetService.LDAP)
-                logger.info(f"DELETE: Including LDAP based on ldapGroups presence")
+                logger.info("DELETE: Including LDAP based on ldapGroups presence")
 
             # Also check odooGroups - if present, include Odoo
             if odoo_groups and TargetService.ODOO not in target_services:
@@ -513,7 +513,7 @@ class RabbitMQConsumer(BrokerConsumer):
 
             # If still no services (no cache, no roles, no groups), try ALL services
             if not target_services:
-                logger.info(f"DELETE operation without any hints - attempting deletion from ALL services")
+                logger.info("DELETE operation without any hints - attempting deletion from ALL services")
                 target_services = [TargetService.MYSQL, TargetService.POSTGRESQL, TargetService.LDAP, TargetService.ODOO]
 
         # Handle role removal (removedRoles attribute from Java connector)
@@ -541,7 +541,7 @@ class RabbitMQConsumer(BrokerConsumer):
                                     "reason": "ldap role removed - group cleanup",
                                 },
                             ))
-                            logger.info(f"Created UPDATE operation for removed LDAP role (group cleanup)")
+                            logger.info("Created UPDATE operation for removed LDAP role (group cleanup)")
                         else:
                             messages.append(MidPointMessage(
                                 request_id=f"{request_id}-{target_service.value.lower()}-delete-{timestamp_ms}",
@@ -587,7 +587,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 if service == TargetService.LDAP:
                     # For LDAP: use UPDATE (not DELETE) so the connector removes group memberships
                     # without deleting the entire LDAP user account
-                    logger.info(f"UPDATE: 'ldap' was removed - creating UPDATE for LDAP group cleanup")
+                    logger.info("UPDATE: 'ldap' was removed - creating UPDATE for LDAP group cleanup")
                     timestamp_ms = int(time.time() * 1000)
                     messages.append(MidPointMessage(
                         request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",

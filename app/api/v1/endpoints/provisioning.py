@@ -1,5 +1,4 @@
 """Provisioning operations endpoints"""
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,7 +23,6 @@ from app.models.schemas import (
     PendingApprovalResponse,
 )
 from app.utils.enums import OperationStatus, OperationType, TargetService
-from app.utils.exceptions import OperationNotFoundError, InvalidOperationStateError
 
 router = APIRouter(prefix="/provisioning", tags=["Provisioning"])
 

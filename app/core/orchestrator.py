@@ -3,7 +3,6 @@ import logging
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 from prisma import Prisma
@@ -348,7 +347,7 @@ class ProvisioningOrchestrator:
             approval_request_id = str(uuid.uuid4())
 
             # Send approval request to Flask worker
-            worker_response = await self._send_approval_request(
+            await self._send_approval_request(
                 operation_id=operation_id,
                 request_id=approval_request_id,
                 operation_data={

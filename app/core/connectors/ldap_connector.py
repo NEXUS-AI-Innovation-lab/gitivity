@@ -389,8 +389,6 @@ class LDAPConnector(ProvisioningConnector):
         else:
             base_dn = settings.LDAP_BASE_DN
 
-        user_dn = f"uid={username},ou=Users,{base_dn}"
-
         try:
             # FIRST: Search for user by employeeNumber (unique identifier)
             existing_dn = await self._find_user_by_employee_number(employee_number, base_dn)

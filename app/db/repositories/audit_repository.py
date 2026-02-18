@@ -1,7 +1,7 @@
 """Repository for AuditLog model"""
 from typing import Any
 
-from prisma import Prisma, Json
+from prisma import Json
 from prisma.models import AuditLog
 from prisma.enums import OperationStatus
 
@@ -149,7 +149,7 @@ class AuditRepository(BaseRepository[AuditLog]):
         return await self.create_log(
             operation_id=operation_id,
             event_type="validation_sent",
-            message=f"Validation request sent to n8n",
+            message="Validation request sent to n8n",
             metadata={
                 "validation_request_id": validation_request_id,
                 "webhook_url": webhook_url,

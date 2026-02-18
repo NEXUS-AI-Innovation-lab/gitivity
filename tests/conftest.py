@@ -2,14 +2,12 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
-import pytest_asyncio
 
 from app.models.domain import MidPointMessage, UserData, ValidationResponse, ProvisioningResult
-from app.utils.enums import OperationType, OperationStatus, TargetService
+from app.utils.enums import OperationType, TargetService
 
 
 @pytest.fixture(scope="session")

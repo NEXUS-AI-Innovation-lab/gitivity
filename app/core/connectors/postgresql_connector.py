@@ -314,8 +314,6 @@ class PostgreSQLConnector(ProvisioningConnector):
                 attrs = attributes or {}
                 postgresql_grants = attrs.get("postgresqlGrants")
                 postgresql_role = attrs.get("postgresqlRole")
-                database = attrs.get("database", "target_db")
-
                 # Update privileges if postgresqlGrants, postgresqlRole, or roles provided
                 if postgresql_grants is not None or postgresql_role is not None or roles is not None:
                     # Revoke existing role memberships

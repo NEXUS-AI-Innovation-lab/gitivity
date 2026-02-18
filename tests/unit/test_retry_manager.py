@@ -1,10 +1,9 @@
 """Unit tests for RetryManager"""
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.retry_manager import RetryManager
-from app.utils.enums import OperationStatus
 
 
 class TestRetryManager:

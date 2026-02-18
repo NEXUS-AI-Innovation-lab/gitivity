@@ -70,7 +70,7 @@ class N8NClient:
         }
 
         logger.info(
-            f"Sending validation request to n8n",
+            "Sending validation request to n8n",
             extra={
                 "operation_id": operation_id,
                 "request_id": request_id,
@@ -89,7 +89,7 @@ class N8NClient:
                 data = response.json()
 
                 logger.info(
-                    f"Validation response received",
+                    "Validation response received",
                     extra={
                         "operation_id": operation_id,
                         "approved": data.get("approved"),
@@ -106,7 +106,7 @@ class N8NClient:
 
         except httpx.TimeoutException:
             logger.error(
-                f"Validation request timed out",
+                "Validation request timed out",
                 extra={"operation_id": operation_id},
             )
             raise ValidationTimeoutError(
@@ -237,7 +237,7 @@ class N8NClient:
             NotificationError: If notification fails after retries
         """
         logger.info(
-            f"Sending notification to n8n",
+            "Sending notification to n8n",
             extra={
                 "operation_id": operation_id,
                 "status": payload.get("status"),
@@ -257,7 +257,7 @@ class N8NClient:
                     response.raise_for_status()
 
                     logger.info(
-                        f"Notification sent successfully",
+                        "Notification sent successfully",
                         extra={"operation_id": operation_id},
                     )
                     return True

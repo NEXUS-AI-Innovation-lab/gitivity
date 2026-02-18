@@ -1,6 +1,5 @@
 """Unit tests for provisioning connectors"""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.connectors.factory import ConnectorFactory, get_connector
 from app.core.connectors.mysql_connector import MySQLConnector, ROLE_TO_PRIVILEGES

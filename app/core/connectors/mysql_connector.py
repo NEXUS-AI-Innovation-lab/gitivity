@@ -140,7 +140,7 @@ class MySQLConnector(ProvisioningConnector):
             async with self._pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     # Create user
-                    create_sql = f"CREATE USER %s@%s IDENTIFIED BY %s"
+                    create_sql = "CREATE USER %s@%s IDENTIFIED BY %s"
                     await cursor.execute(create_sql, (username, host, password))
                     logger.info(f"Created MySQL user: {username}@{host}")
 
@@ -239,7 +239,7 @@ class MySQLConnector(ProvisioningConnector):
                 async with conn.cursor() as cursor:
                     # Update password if provided
                     if password:
-                        alter_sql = f"ALTER USER %s@%s IDENTIFIED BY %s"
+                        alter_sql = "ALTER USER %s@%s IDENTIFIED BY %s"
                         await cursor.execute(alter_sql, (username, host, password))
                         logger.info(f"Updated password for MySQL user: {username}@{host}")
 
@@ -264,7 +264,7 @@ class MySQLConnector(ProvisioningConnector):
                     # Update privileges if mysqlGrants, mysqlRole, or roles provided
                     if mysql_grants is not None or mysql_role is not None or roles is not None:
                         # Revoke all existing privileges
-                        revoke_sql = f"REVOKE ALL PRIVILEGES ON *.* FROM %s@%s"
+                        revoke_sql = "REVOKE ALL PRIVILEGES ON *.* FROM %s@%s"
                         try:
                             await cursor.execute(revoke_sql, (username, host))
                         except aiomysql.Error:
@@ -344,7 +344,7 @@ class MySQLConnector(ProvisioningConnector):
 
                     # Drop user for each host
                     for (host,) in hosts:
-                        drop_sql = f"DROP USER %s@%s"
+                        drop_sql = "DROP USER %s@%s"
                         await cursor.execute(drop_sql, (username, host))
                         logger.info(f"Deleted MySQL user: {username}@{host}")
 

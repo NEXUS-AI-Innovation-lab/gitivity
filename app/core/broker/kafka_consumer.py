@@ -42,7 +42,7 @@ class KafkaConsumer(BrokerConsumer):
     async def start(self) -> None:
         """Start consuming messages from Kafka"""
         logger.info(
-            f"Starting Kafka consumer",
+            "Starting Kafka consumer",
             extra={
                 "bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS,
                 "topic": settings.KAFKA_TOPIC,
@@ -70,7 +70,7 @@ class KafkaConsumer(BrokerConsumer):
                     break
 
                 logger.debug(
-                    f"Received Kafka message",
+                    "Received Kafka message",
                     extra={
                         "topic": msg.topic,
                         "partition": msg.partition,
@@ -121,7 +121,7 @@ class KafkaConsumer(BrokerConsumer):
             operation_id = await self._orchestrator.process_message(midpoint_message)
 
             logger.info(
-                f"Message processed successfully",
+                "Message processed successfully",
                 extra={
                     "operation_id": operation_id,
                     "request_id": midpoint_message.request_id,
