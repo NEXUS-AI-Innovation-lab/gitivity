@@ -151,9 +151,7 @@ class DLQManager:
             order={"created_at": "desc"},
         )
 
-        total = await self._db.deadletterqueue.count(
-            where=where if where else None
-        )
+        total = await self._db.deadletterqueue.count(where=where if where else None)
 
         return messages, total
 
@@ -166,9 +164,7 @@ class DLQManager:
         Returns:
             The DLQ entry if found, None otherwise
         """
-        return await self._db.deadletterqueue.find_unique(
-            where={"id": dlq_id}
-        )
+        return await self._db.deadletterqueue.find_unique(where={"id": dlq_id})
 
     async def retry_from_dlq(
         self,

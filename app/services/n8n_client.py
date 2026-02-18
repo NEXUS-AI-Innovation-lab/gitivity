@@ -32,7 +32,9 @@ class N8NClient:
             timeout: Override request timeout in seconds
         """
         self._validation_url = validation_url or settings.N8N_VALIDATION_WEBHOOK_URL
-        self._notification_url = notification_url or settings.N8N_NOTIFICATION_WEBHOOK_URL
+        self._notification_url = (
+            notification_url or settings.N8N_NOTIFICATION_WEBHOOK_URL
+        )
         self._timeout = timeout or settings.N8N_TIMEOUT
 
     async def validate(

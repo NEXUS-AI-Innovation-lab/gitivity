@@ -71,10 +71,9 @@ class TestRetryManager:
         mock_operation.retry_count = 0
         mock_operation.max_retries = 3
 
-        with patch.object(retry_manager, "_repo") as mock_repo, \
-             patch.object(retry_manager, "_audit") as mock_audit, \
-             patch("app.core.retry_manager.settings") as mock_settings:
-
+        with patch.object(retry_manager, "_repo") as mock_repo, patch.object(
+            retry_manager, "_audit"
+        ) as mock_audit, patch("app.core.retry_manager.settings") as mock_settings:
             mock_settings.RETRY_INITIAL_DELAY = 5
             mock_settings.RETRY_BACKOFF_MULTIPLIER = 2.0
             mock_settings.RETRY_MAX_DELAY = 300
@@ -96,9 +95,9 @@ class TestRetryManager:
         mock_operation.retry_count = 3
         mock_operation.max_retries = 3
 
-        with patch.object(retry_manager, "_repo") as mock_repo, \
-             patch("app.core.retry_manager.DLQManager") as mock_dlq_class:
-
+        with patch.object(retry_manager, "_repo") as mock_repo, patch(
+            "app.core.retry_manager.DLQManager"
+        ) as mock_dlq_class:
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
             mock_dlq = AsyncMock()
             mock_dlq_class.return_value = mock_dlq

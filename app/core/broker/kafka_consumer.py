@@ -192,8 +192,10 @@ class KafkaConsumer(BrokerConsumer):
             user_data = UserData(
                 username=user_data_raw.get("username", ""),
                 email=user_data_raw.get("email"),
-                first_name=user_data_raw.get("first_name") or user_data_raw.get("firstName"),
-                last_name=user_data_raw.get("last_name") or user_data_raw.get("lastName"),
+                first_name=user_data_raw.get("first_name")
+                or user_data_raw.get("firstName"),
+                last_name=user_data_raw.get("last_name")
+                or user_data_raw.get("lastName"),
                 password=user_data_raw.get("password"),
                 roles=user_data_raw.get("roles", []),
                 attributes=user_data_raw.get("attributes", {}),

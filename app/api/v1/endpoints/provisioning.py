@@ -29,9 +29,15 @@ router = APIRouter(prefix="/provisioning", tags=["Provisioning"])
 
 @router.get("", response_model=ProvisioningListResponse)
 async def list_operations(
-    status: Annotated[OperationStatus | None, Query(description="Filter by status")] = None,
-    target_service: Annotated[TargetService | None, Query(description="Filter by target service")] = None,
-    operation_type: Annotated[OperationType | None, Query(description="Filter by operation type")] = None,
+    status: Annotated[
+        OperationStatus | None, Query(description="Filter by status")
+    ] = None,
+    target_service: Annotated[
+        TargetService | None, Query(description="Filter by target service")
+    ] = None,
+    operation_type: Annotated[
+        OperationType | None, Query(description="Filter by operation type")
+    ] = None,
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 50,
     db: Prisma = Depends(get_db),
@@ -83,10 +89,14 @@ async def get_operation(
     """Get a provisioning operation by ID with optional audit logs"""
     repo = ProvisioningRepository(db)
 
-    operation = await repo.get_by_id(operation_id, include_audit_logs=include_audit_logs)
+    operation = await repo.get_by_id(
+        operation_id, include_audit_logs=include_audit_logs
+    )
 
     if not operation:
-        raise HTTPException(status_code=404, detail=f"Operation not found: {operation_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Operation not found: {operation_id}"
+        )
 
     audit_logs = None
     if include_audit_logs and operation.audit_logs:
@@ -155,7 +165,9 @@ async def retry_operation(
     operation = await repo.get_by_id(operation_id)
 
     if not operation:
-        raise HTTPException(status_code=404, detail=f"Operation not found: {operation_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Operation not found: {operation_id}"
+        )
 
     # Check if operation can be retried
     retriable_statuses = [OperationStatus.FAILED, OperationStatus.DLQ]
@@ -167,7 +179,9 @@ async def retry_operation(
         )
 
     # Reset retry count if requested
-    retry_count = 0 if (request and request.reset_retry_count) else operation.retry_count
+    retry_count = (
+        0 if (request and request.reset_retry_count) else operation.retry_count
+    )
 
     # Schedule retry using RetryManager
     retry_manager = RetryManager(db)
@@ -203,7 +217,9 @@ async def retry_operation(
     )
 
 
-@router.post("/{operation_id}/approve-callback", response_model=ApprovalCallbackResponse)
+@router.post(
+    "/{operation_id}/approve-callback", response_model=ApprovalCallbackResponse
+)
 async def receive_approval_callback(
     operation_id: str,
     request: ApprovalCallbackRequest,

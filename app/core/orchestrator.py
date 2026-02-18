@@ -94,7 +94,10 @@ class ProvisioningOrchestrator:
             )
 
             # Check if a previous CREATE was rejected for this user+service
-            if message.operation_type in (OperationType.UPDATE_USER, OperationType.DELETE_USER):
+            if message.operation_type in (
+                OperationType.UPDATE_USER,
+                OperationType.DELETE_USER,
+            ):
                 approval_repo = await self._get_approval_repo()
                 username = message.user_data.username
                 target_svc = message.target_service.value
@@ -403,7 +406,9 @@ class ProvisioningOrchestrator:
         try:
             with open(data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            approvers = sorted(data.get("approvers", []), key=lambda a: a.get("level", 0))
+            approvers = sorted(
+                data.get("approvers", []), key=lambda a: a.get("level", 0)
+            )
             logger.info(f"Loaded {len(approvers)} approvers for approval chain")
             return approvers
         except Exception as e:
@@ -429,9 +434,13 @@ class ProvisioningOrchestrator:
             if field_key == "password":
                 # Don't compare passwords, just detect if set
                 if new_val and new_val != old_val:
-                    changes.append({"field": field_label, "old": "(ancien)", "new": "(modifie)"})
+                    changes.append(
+                        {"field": field_label, "old": "(ancien)", "new": "(modifie)"}
+                    )
             elif str(old_val) != str(new_val) and new_val:
-                changes.append({"field": field_label, "old": str(old_val), "new": str(new_val)})
+                changes.append(
+                    {"field": field_label, "old": str(old_val), "new": str(new_val)}
+                )
 
         # Compare roles
         old_roles = set(old_data.get("roles") or [])
@@ -444,12 +453,14 @@ class ProvisioningOrchestrator:
                 role_parts.append("Ajoutes: " + ", ".join(sorted(added)))
             if removed:
                 role_parts.append("Retires: " + ", ".join(sorted(removed)))
-            changes.append({
-                "field": "Roles",
-                "old": ", ".join(sorted(old_roles)) or "Aucun",
-                "new": ", ".join(sorted(new_roles)) or "Aucun",
-                "details": " | ".join(role_parts),
-            })
+            changes.append(
+                {
+                    "field": "Roles",
+                    "old": ", ".join(sorted(old_roles)) or "Aucun",
+                    "new": ", ".join(sorted(new_roles)) or "Aucun",
+                    "details": " | ".join(role_parts),
+                }
+            )
 
         # Compare attributes
         old_attrs = old_data.get("attributes") or {}
@@ -494,11 +505,17 @@ class ProvisioningOrchestrator:
                 target_svc = operation_data["target_service"]
                 old_state = await approval_repo.get_user_state(username, target_svc)
                 if old_state:
-                    diff = self._compute_user_diff(old_state, operation_data["user_data"])
+                    diff = self._compute_user_diff(
+                        old_state, operation_data["user_data"]
+                    )
                     payload["changes"] = diff
-                    logger.info(f"Computed {len(diff)} changes for UPDATE {username} on {target_svc}")
+                    logger.info(
+                        f"Computed {len(diff)} changes for UPDATE {username} on {target_svc}"
+                    )
                 else:
-                    logger.info(f"No previous state for {username} on {target_svc}, cannot compute diff")
+                    logger.info(
+                        f"No previous state for {username} on {target_svc}, cannot compute diff"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to compute diff: {e}")
 
@@ -544,15 +561,18 @@ class ProvisioningOrchestrator:
 
             # Store approval response in database
             from prisma import Json
+
             await self._db.provisioningoperation.update(
                 where={"id": operation_id},
                 data={
-                    "approval_response": Json({
-                        "approved": approved,
-                        "reason": reason,
-                        "worker_id": worker_id,
-                        "decided_at": datetime.now(timezone.utc).isoformat(),
-                    }),
+                    "approval_response": Json(
+                        {
+                            "approved": approved,
+                            "reason": reason,
+                            "worker_id": worker_id,
+                            "decided_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    ),
                     "approved_at": datetime.now(timezone.utc),
                     "approved_by": worker_id,
                     "approval_reason": reason,
@@ -707,7 +727,9 @@ class ProvisioningOrchestrator:
         if operation.original_message:
             return MidPointMessage(**operation.original_message)
 
-        raise ValueError(f"Cannot reconstruct MidPointMessage for operation {operation.id}")
+        raise ValueError(
+            f"Cannot reconstruct MidPointMessage for operation {operation.id}"
+        )
 
     async def _notify_approval_rejected(
         self,
@@ -920,9 +942,7 @@ class ProvisioningOrchestrator:
             # 1. Find user in MidPoint
             user = await midpoint_client.search_user(username)
             if not user:
-                logger.warning(
-                    f"MidPoint user not found for role removal: {username}"
-                )
+                logger.warning(f"MidPoint user not found for role removal: {username}")
                 return
 
             user_oid = user.get("oid")

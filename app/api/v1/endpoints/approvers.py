@@ -17,6 +17,7 @@ DATA_FILE = Path(__file__).resolve().parents[4] / "data" / "approvers.json"
 # Models
 # ============================================================================
 
+
 class ApproverCreate(BaseModel):
     name: str
     email: str
@@ -40,6 +41,7 @@ class ApproverResponse(BaseModel):
 # Helpers
 # ============================================================================
 
+
 def _read_approvers() -> list[dict]:
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -57,6 +59,7 @@ def _write_approvers(approvers: list[dict]) -> None:
 # ============================================================================
 # Endpoints
 # ============================================================================
+
 
 @router.get("", response_model=list[ApproverResponse])
 async def list_approvers():

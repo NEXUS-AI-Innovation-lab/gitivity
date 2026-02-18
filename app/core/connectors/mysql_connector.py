@@ -82,7 +82,7 @@ class MySQLConnector(ProvisioningConnector):
             async with conn.cursor() as cursor:
                 await cursor.execute(
                     "SELECT 1 FROM mysql.user WHERE User = %s AND Host = %s",
-                    (username, host)
+                    (username, host),
                 )
                 result = await cursor.fetchone()
                 return result is not None
@@ -155,7 +155,9 @@ class MySQLConnector(ProvisioningConnector):
                     # Priority 2: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
                     elif mysql_role:
                         privileges = self._roles_to_privileges([mysql_role])
-                        logger.info(f"Using mysqlRole attribute '{mysql_role}': {privileges}")
+                        logger.info(
+                            f"Using mysqlRole attribute '{mysql_role}': {privileges}"
+                        )
                         for privilege in privileges:
                             grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
                             await cursor.execute(grant_sql, (username, host))
@@ -223,13 +225,15 @@ class MySQLConnector(ProvisioningConnector):
 
         # Check if user exists - if not, create it first
         if not await self._user_exists(username, host):
-            logger.info(f"MySQL user {username}@{host} does not exist, creating first...")
+            logger.info(
+                f"MySQL user {username}@{host} does not exist, creating first..."
+            )
             async with self._pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     create_password = password if password else "changeme"
                     await cursor.execute(
                         "CREATE USER %s@%s IDENTIFIED BY %s",
-                        (username, host, create_password)
+                        (username, host, create_password),
                     )
                     await cursor.execute("FLUSH PRIVILEGES")
             logger.info(f"Created MySQL user: {username}@{host}")
@@ -241,7 +245,9 @@ class MySQLConnector(ProvisioningConnector):
                     if password:
                         alter_sql = "ALTER USER %s@%s IDENTIFIED BY %s"
                         await cursor.execute(alter_sql, (username, host, password))
-                        logger.info(f"Updated password for MySQL user: {username}@{host}")
+                        logger.info(
+                            f"Updated password for MySQL user: {username}@{host}"
+                        )
 
                     # Handle enable/disable (ACCOUNT LOCK/UNLOCK)
                     attrs = attributes or {}
@@ -262,7 +268,11 @@ class MySQLConnector(ProvisioningConnector):
                     mysql_role = attributes.get("mysqlRole") if attributes else None
 
                     # Update privileges if mysqlGrants, mysqlRole, or roles provided
-                    if mysql_grants is not None or mysql_role is not None or roles is not None:
+                    if (
+                        mysql_grants is not None
+                        or mysql_role is not None
+                        or roles is not None
+                    ):
                         # Revoke all existing privileges
                         revoke_sql = "REVOKE ALL PRIVILEGES ON *.* FROM %s@%s"
                         try:
@@ -277,7 +287,9 @@ class MySQLConnector(ProvisioningConnector):
                         # Priority 2: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
                         elif mysql_role:
                             privileges = self._roles_to_privileges([mysql_role])
-                            logger.info(f"Updating with mysqlRole '{mysql_role}': {privileges}")
+                            logger.info(
+                                f"Updating with mysqlRole '{mysql_role}': {privileges}"
+                            )
                         # Priority 3: Use role-based privileges from roles array
                         elif roles is not None:
                             privileges = self._roles_to_privileges(roles)

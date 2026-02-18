@@ -3,7 +3,10 @@ import pytest
 
 from app.core.connectors.factory import ConnectorFactory, get_connector
 from app.core.connectors.mysql_connector import MySQLConnector, ROLE_TO_PRIVILEGES
-from app.core.connectors.postgresql_connector import PostgreSQLConnector, ROLE_TO_PG_ROLES
+from app.core.connectors.postgresql_connector import (
+    PostgreSQLConnector,
+    ROLE_TO_PG_ROLES,
+)
 from app.utils.enums import TargetService
 from app.utils.exceptions import ConnectorNotFoundError
 

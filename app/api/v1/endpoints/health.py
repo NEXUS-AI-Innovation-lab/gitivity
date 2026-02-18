@@ -72,7 +72,9 @@ async def get_metrics(db: Prisma = Depends(get_db)) -> MetricsResponse:
         count = 0
         for op in successful_ops:
             if op.processing_started_at and op.processing_completed_at:
-                diff = (op.processing_completed_at - op.processing_started_at).total_seconds() * 1000
+                diff = (
+                    op.processing_completed_at - op.processing_started_at
+                ).total_seconds() * 1000
                 total_time += diff
                 count += 1
         if count > 0:

@@ -43,7 +43,7 @@ class RetryManager:
             Tuple of (next_retry_at datetime, delay_seconds)
         """
         delay = settings.RETRY_INITIAL_DELAY * (
-            settings.RETRY_BACKOFF_MULTIPLIER ** retry_count
+            settings.RETRY_BACKOFF_MULTIPLIER**retry_count
         )
         delay = min(delay, settings.RETRY_MAX_DELAY)
         delay_int = int(delay)

@@ -47,13 +47,13 @@ def generate_random_password(length: int = 12) -> str:
     # Fill the rest with random characters
     remaining_length = length - 4
     all_chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    remaining = ''.join(secrets.choice(all_chars) for _ in range(remaining_length))
+    remaining = "".join(secrets.choice(all_chars) for _ in range(remaining_length))
 
     # Combine and shuffle
     password_list = list(uppercase + lowercase + digit + special + remaining)
     secrets.SystemRandom().shuffle(password_list)
 
-    return ''.join(password_list)
+    return "".join(password_list)
 
 
 class RabbitMQConsumer(BrokerConsumer):
@@ -188,7 +188,9 @@ class RabbitMQConsumer(BrokerConsumer):
 
             # Process each message through orchestrator
             for midpoint_message in midpoint_messages:
-                operation_id = await self._orchestrator.process_message(midpoint_message)
+                operation_id = await self._orchestrator.process_message(
+                    midpoint_message
+                )
 
                 logger.info(
                     "Message processed successfully",
@@ -274,7 +276,9 @@ class RabbitMQConsumer(BrokerConsumer):
             # Detect message format: MidPoint connector or gateway-iam native
             # MidPoint format has "operation" field (CREATE, UPDATE, DELETE)
             # DELETE messages may not have "attributes" field
-            if "operation" in data and ("attributes" in data or data.get("operation") == "DELETE"):
+            if "operation" in data and (
+                "attributes" in data or data.get("operation") == "DELETE"
+            ):
                 return await self._parse_midpoint_format(data)
             else:
                 return [self._parse_native_format(data)]
@@ -287,7 +291,9 @@ class RabbitMQConsumer(BrokerConsumer):
                 raw_message=str(data)[:500],
             )
 
-    async def _parse_midpoint_format(self, data: dict[str, Any]) -> list[MidPointMessage]:
+    async def _parse_midpoint_format(
+        self, data: dict[str, Any]
+    ) -> list[MidPointMessage]:
         """Parse MidPoint connector format message
 
         Format:
@@ -316,9 +322,7 @@ class RabbitMQConsumer(BrokerConsumer):
         # Extract request ID (use uid from MidPoint)
         request_id = data.get("uid") or data.get("requestId") or data.get("request_id")
         if not request_id:
-            raise MessageParsingError(
-                error_message="Missing required field: uid"
-            )
+            raise MessageParsingError(error_message="Missing required field: uid")
 
         # Extract attributes
         attributes = data.get("attributes", {})
@@ -349,10 +353,13 @@ class RabbitMQConsumer(BrokerConsumer):
 
         # === DELETE enrichment: fetch user info from MidPoint/Redis ===
         if operation_type == OperationType.DELETE_USER and not username:
-            logger.info(f"DELETE without attributes - enriching from MidPoint (uid={request_id})")
+            logger.info(
+                f"DELETE without attributes - enriching from MidPoint (uid={request_id})"
+            )
             # Try MidPoint API first
             try:
                 from app.services.midpoint_client import midpoint_client
+
                 mp_user = await midpoint_client.get_user(request_id)
                 if mp_user:
                     # Extract username
@@ -371,9 +378,13 @@ class RabbitMQConsumer(BrokerConsumer):
 
                     # Extract names
                     gn = mp_user.get("givenName", {})
-                    first_name = gn.get("orig", "") if isinstance(gn, dict) else (gn or "")
+                    first_name = (
+                        gn.get("orig", "") if isinstance(gn, dict) else (gn or "")
+                    )
                     fn = mp_user.get("familyName", {})
-                    last_name = fn.get("orig", "") if isinstance(fn, dict) else (fn or "")
+                    last_name = (
+                        fn.get("orig", "") if isinstance(fn, dict) else (fn or "")
+                    )
 
                     # Determine services from role assignments
                     assignments = mp_user.get("assignment", [])
@@ -395,7 +406,9 @@ class RabbitMQConsumer(BrokerConsumer):
                             except Exception:
                                 pass
 
-                    logger.info(f"DELETE enriched from MidPoint: username={username}, roles={roles}")
+                    logger.info(
+                        f"DELETE enriched from MidPoint: username={username}, roles={roles}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to enrich DELETE from MidPoint: {e}")
 
@@ -403,6 +416,7 @@ class RabbitMQConsumer(BrokerConsumer):
             if not username:
                 try:
                     from app.db.redis_client import RedisClient
+
                     redis_client = await RedisClient.get_client()
                     for svc in ["MYSQL", "POSTGRESQL", "LDAP", "ODOO"]:
                         keys = await redis_client.keys(f"user_state:{svc}:*")
@@ -410,12 +424,17 @@ class RabbitMQConsumer(BrokerConsumer):
                             value = await redis_client.get(k)
                             if value:
                                 state = json.loads(value)
-                                if state.get("attributes", {}).get("midpoint_uid") == request_id:
+                                if (
+                                    state.get("attributes", {}).get("midpoint_uid")
+                                    == request_id
+                                ):
                                     username = state.get("username", "")
                                     email = email or state.get("email")
                                     first_name = first_name or state.get("first_name")
                                     last_name = last_name or state.get("last_name")
-                                    logger.info(f"DELETE enriched from Redis: username={username}")
+                                    logger.info(
+                                        f"DELETE enriched from Redis: username={username}"
+                                    )
                                     break
                         if username:
                             break
@@ -489,7 +508,9 @@ class RabbitMQConsumer(BrokerConsumer):
             cached_services = _user_services_cache.get(request_id, set())
             if cached_services:
                 target_services = list(cached_services)
-                logger.info(f"DELETE: Using cached services for user {request_id}: {[s.value for s in target_services]}")
+                logger.info(
+                    f"DELETE: Using cached services for user {request_id}: {[s.value for s in target_services]}"
+                )
                 # Clear cache after DELETE
                 del _user_services_cache[request_id]
 
@@ -513,8 +534,15 @@ class RabbitMQConsumer(BrokerConsumer):
 
             # If still no services (no cache, no roles, no groups), try ALL services
             if not target_services:
-                logger.info("DELETE operation without any hints - attempting deletion from ALL services")
-                target_services = [TargetService.MYSQL, TargetService.POSTGRESQL, TargetService.LDAP, TargetService.ODOO]
+                logger.info(
+                    "DELETE operation without any hints - attempting deletion from ALL services"
+                )
+                target_services = [
+                    TargetService.MYSQL,
+                    TargetService.POSTGRESQL,
+                    TargetService.LDAP,
+                    TargetService.ODOO,
+                ]
 
         # Handle role removal (removedRoles attribute from Java connector)
         elif removed_roles:
@@ -528,34 +556,42 @@ class RabbitMQConsumer(BrokerConsumer):
                         timestamp_ms = int(time.time() * 1000)
                         if target_service == TargetService.LDAP:
                             # For LDAP: UPDATE to remove group memberships (not DELETE the user)
-                            messages.append(MidPointMessage(
-                                request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",
-                                operation_type=OperationType.UPDATE_USER,
-                                target_service=TargetService.LDAP,
-                                user_data=user_data,
-                                metadata={
-                                    "source": "midpoint",
-                                    "entityType": data.get("entityType", "User"),
-                                    "original_uid": request_id,
-                                    "removed_role": role,
-                                    "reason": "ldap role removed - group cleanup",
-                                },
-                            ))
-                            logger.info("Created UPDATE operation for removed LDAP role (group cleanup)")
+                            messages.append(
+                                MidPointMessage(
+                                    request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",
+                                    operation_type=OperationType.UPDATE_USER,
+                                    target_service=TargetService.LDAP,
+                                    user_data=user_data,
+                                    metadata={
+                                        "source": "midpoint",
+                                        "entityType": data.get("entityType", "User"),
+                                        "original_uid": request_id,
+                                        "removed_role": role,
+                                        "reason": "ldap role removed - group cleanup",
+                                    },
+                                )
+                            )
+                            logger.info(
+                                "Created UPDATE operation for removed LDAP role (group cleanup)"
+                            )
                         else:
-                            messages.append(MidPointMessage(
-                                request_id=f"{request_id}-{target_service.value.lower()}-delete-{timestamp_ms}",
-                                operation_type=OperationType.DELETE_USER,
-                                target_service=target_service,
-                                user_data=user_data,
-                                metadata={
-                                    "source": "midpoint",
-                                    "entityType": data.get("entityType", "User"),
-                                    "original_uid": request_id,
-                                    "removed_role": role,
-                                },
-                            ))
-                            logger.info(f"Created DELETE operation for removed role '{role}' -> {target_service.value}")
+                            messages.append(
+                                MidPointMessage(
+                                    request_id=f"{request_id}-{target_service.value.lower()}-delete-{timestamp_ms}",
+                                    operation_type=OperationType.DELETE_USER,
+                                    target_service=target_service,
+                                    user_data=user_data,
+                                    metadata={
+                                        "source": "midpoint",
+                                        "entityType": data.get("entityType", "User"),
+                                        "original_uid": request_id,
+                                        "removed_role": role,
+                                    },
+                                )
+                            )
+                            logger.info(
+                                f"Created DELETE operation for removed role '{role}' -> {target_service.value}"
+                            )
 
             # Map remaining roles to target services for UPDATE
             target_services = []
@@ -580,42 +616,52 @@ class RabbitMQConsumer(BrokerConsumer):
             removed_services = previous_services - current_services
 
             if removed_services:
-                logger.info(f"UPDATE: Detected removed services for user {request_id}: {[s.value for s in removed_services]}")
+                logger.info(
+                    f"UPDATE: Detected removed services for user {request_id}: {[s.value for s in removed_services]}"
+                )
 
             # Create operations for removed services
             for service in removed_services:
                 if service == TargetService.LDAP:
                     # For LDAP: use UPDATE (not DELETE) so the connector removes group memberships
                     # without deleting the entire LDAP user account
-                    logger.info("UPDATE: 'ldap' was removed - creating UPDATE for LDAP group cleanup")
+                    logger.info(
+                        "UPDATE: 'ldap' was removed - creating UPDATE for LDAP group cleanup"
+                    )
                     timestamp_ms = int(time.time() * 1000)
-                    messages.append(MidPointMessage(
-                        request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",
-                        operation_type=OperationType.UPDATE_USER,
-                        target_service=TargetService.LDAP,
-                        user_data=user_data,
-                        metadata={
-                            "source": "midpoint",
-                            "entityType": data.get("entityType", "User"),
-                            "original_uid": request_id,
-                            "reason": "ldap role removed - group cleanup",
-                        },
-                    ))
+                    messages.append(
+                        MidPointMessage(
+                            request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",
+                            operation_type=OperationType.UPDATE_USER,
+                            target_service=TargetService.LDAP,
+                            user_data=user_data,
+                            metadata={
+                                "source": "midpoint",
+                                "entityType": data.get("entityType", "User"),
+                                "original_uid": request_id,
+                                "reason": "ldap role removed - group cleanup",
+                            },
+                        )
+                    )
                 else:
-                    logger.info(f"UPDATE: '{service.value}' was removed - creating DELETE")
+                    logger.info(
+                        f"UPDATE: '{service.value}' was removed - creating DELETE"
+                    )
                     timestamp_ms = int(time.time() * 1000)
-                    messages.append(MidPointMessage(
-                        request_id=f"{request_id}-{service.value.lower()}-delete-{timestamp_ms}",
-                        operation_type=OperationType.DELETE_USER,
-                        target_service=service,
-                        user_data=user_data,
-                        metadata={
-                            "source": "midpoint",
-                            "entityType": data.get("entityType", "User"),
-                            "original_uid": request_id,
-                            "reason": f"{service.value} role removed",
-                        },
-                    ))
+                    messages.append(
+                        MidPointMessage(
+                            request_id=f"{request_id}-{service.value.lower()}-delete-{timestamp_ms}",
+                            operation_type=OperationType.DELETE_USER,
+                            target_service=service,
+                            user_data=user_data,
+                            metadata={
+                                "source": "midpoint",
+                                "entityType": data.get("entityType", "User"),
+                                "original_uid": request_id,
+                                "reason": f"{service.value} role removed",
+                            },
+                        )
+                    )
                 target_services_processed.add(service)
 
             # Update cache with current services
@@ -635,7 +681,9 @@ class RabbitMQConsumer(BrokerConsumer):
             # Store in cache for future UPDATE/DELETE tracking
             if operation_type == OperationType.CREATE_USER and target_services:
                 _user_services_cache[request_id] = set(target_services)
-                logger.info(f"CREATE: Cached services for user {request_id}: {[s.value for s in target_services]}")
+                logger.info(
+                    f"CREATE: Cached services for user {request_id}: {[s.value for s in target_services]}"
+                )
 
         for target_service in target_services:
             # Avoid duplicate provisioning to same service
@@ -645,18 +693,20 @@ class RabbitMQConsumer(BrokerConsumer):
 
             # Add timestamp to make request_id unique per operation
             timestamp_ms = int(time.time() * 1000)
-            messages.append(MidPointMessage(
-                request_id=f"{request_id}-{target_service.value.lower()}-{timestamp_ms}",
-                operation_type=operation_type,
-                target_service=target_service,
-                user_data=user_data,
-                metadata={
-                    "source": "midpoint",
-                    "entityType": data.get("entityType", "User"),
-                    "original_uid": request_id,
-                    "roles": roles,
-                },
-            ))
+            messages.append(
+                MidPointMessage(
+                    request_id=f"{request_id}-{target_service.value.lower()}-{timestamp_ms}",
+                    operation_type=operation_type,
+                    target_service=target_service,
+                    user_data=user_data,
+                    metadata={
+                        "source": "midpoint",
+                        "entityType": data.get("entityType", "User"),
+                        "original_uid": request_id,
+                        "roles": roles,
+                    },
+                )
+            )
 
         if not messages:
             logger.warning(
@@ -717,7 +767,8 @@ class RabbitMQConsumer(BrokerConsumer):
         user_data = UserData(
             username=user_data_raw.get("username", ""),
             email=user_data_raw.get("email"),
-            first_name=user_data_raw.get("first_name") or user_data_raw.get("firstName"),
+            first_name=user_data_raw.get("first_name")
+            or user_data_raw.get("firstName"),
             last_name=user_data_raw.get("last_name") or user_data_raw.get("lastName"),
             password=user_data_raw.get("password"),
             roles=user_data_raw.get("roles", []),

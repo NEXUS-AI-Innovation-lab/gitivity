@@ -17,7 +17,9 @@ async def get_audit_logs(
     operation_id: str,
     event_type: Annotated[str | None, Query(description="Filter by event type")] = None,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
-    take: Annotated[int, Query(ge=1, le=500, description="Number of records to return")] = 100,
+    take: Annotated[
+        int, Query(ge=1, le=500, description="Number of records to return")
+    ] = 100,
     db: Prisma = Depends(get_db),
 ) -> list[AuditLogResponse]:
     """Get audit logs for a specific operation"""
@@ -26,7 +28,9 @@ async def get_audit_logs(
     # Check if operation exists
     operation = await db.provisioningoperation.find_unique(where={"id": operation_id})
     if not operation:
-        raise HTTPException(status_code=404, detail=f"Operation not found: {operation_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Operation not found: {operation_id}"
+        )
 
     logs = await repo.get_logs_for_operation(
         operation_id=operation_id,

@@ -64,7 +64,9 @@ class AuditService:
             actor_type=actor_type.value,
             actor_id=actor_id,
         )
-        logger.debug(f"Logged status change for {operation_id}: {old_status} -> {new_status}")
+        logger.debug(
+            f"Logged status change for {operation_id}: {old_status} -> {new_status}"
+        )
 
     async def log_validation_sent(
         self,
@@ -98,7 +100,9 @@ class AuditService:
             },
             actor_type=ActorType.SYSTEM.value,
         )
-        logger.debug(f"Logged validation_response for {operation_id}: approved={approved}")
+        logger.debug(
+            f"Logged validation_response for {operation_id}: approved={approved}"
+        )
 
     async def log_approval_requested(
         self,
@@ -139,7 +143,9 @@ class AuditService:
             actor_type=ActorType.SYSTEM.value,
             actor_id=worker_id,
         )
-        logger.debug(f"Logged approval_response for {operation_id}: approved={approved}")
+        logger.debug(
+            f"Logged approval_response for {operation_id}: approved={approved}"
+        )
 
     async def log_provisioning_started(
         self,
