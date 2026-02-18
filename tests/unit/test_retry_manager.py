@@ -96,7 +96,7 @@ class TestRetryManager:
         mock_operation.max_retries = 3
 
         with patch.object(retry_manager, "_repo") as mock_repo, patch(
-            "app.core.retry_manager.DLQManager"
+            "app.core.dead_letter_queue.DLQManager"
         ) as mock_dlq_class:
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
             mock_dlq = AsyncMock()

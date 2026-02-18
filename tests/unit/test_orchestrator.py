@@ -70,7 +70,13 @@ class TestProvisioningOrchestrator:
             orchestrator, "_audit"
         ) as mock_audit, patch(
             "app.core.orchestrator.ConnectorFactory"
-        ) as mock_factory:
+        ) as mock_factory, patch(
+            "app.core.orchestrator.settings"
+        ) as mock_settings:
+            mock_settings.N8N_ENABLED = True
+            mock_settings.APPROVAL_ENABLED = False
+            mock_settings.RETRY_MAX_ATTEMPTS = 3
+
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
             mock_repo.update_status = AsyncMock()
@@ -126,7 +132,11 @@ class TestProvisioningOrchestrator:
 
         with patch.object(orchestrator, "_repo") as mock_repo, patch.object(
             orchestrator, "_audit"
-        ) as mock_audit:
+        ) as mock_audit, patch("app.core.orchestrator.settings") as mock_settings:
+            mock_settings.N8N_ENABLED = True
+            mock_settings.APPROVAL_ENABLED = False
+            mock_settings.RETRY_MAX_ATTEMPTS = 3
+
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.update_status = AsyncMock()
             mock_audit.log_operation_created = AsyncMock()
@@ -153,7 +163,11 @@ class TestProvisioningOrchestrator:
             orchestrator, "_audit"
         ) as mock_audit, patch(
             "app.core.orchestrator.ConnectorFactory"
-        ) as mock_factory:
+        ) as mock_factory, patch("app.core.orchestrator.settings") as mock_settings:
+            mock_settings.N8N_ENABLED = True
+            mock_settings.APPROVAL_ENABLED = False
+            mock_settings.RETRY_MAX_ATTEMPTS = 3
+
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
             mock_repo.update_status = AsyncMock()

@@ -26,9 +26,15 @@ class TestConnectorFactory:
 
     def test_create_unsupported_service(self):
         """Test that unsupported service raises error"""
-        # LDAP is defined but not implemented
-        with pytest.raises(ConnectorNotFoundError):
-            ConnectorFactory.create(TargetService.LDAP)
+        from app.core.connectors.ldap_connector import LDAPConnector
+
+        original = ConnectorFactory._connectors.copy()
+        ConnectorFactory._connectors.pop(TargetService.LDAP)
+        try:
+            with pytest.raises(ConnectorNotFoundError):
+                ConnectorFactory.create(TargetService.LDAP)
+        finally:
+            ConnectorFactory._connectors[TargetService.LDAP] = LDAPConnector
 
     def test_get_available_services(self):
         """Test getting available services"""
@@ -40,7 +46,7 @@ class TestConnectorFactory:
     def test_is_service_available(self):
         """Test checking service availability"""
         assert ConnectorFactory.is_service_available(TargetService.MYSQL) is True
-        assert ConnectorFactory.is_service_available(TargetService.LDAP) is False
+        assert ConnectorFactory.is_service_available(TargetService.LDAP) is True
 
     def test_get_connector_convenience_function(self):
         """Test get_connector convenience function"""
@@ -79,9 +85,9 @@ class TestMySQLConnector:
         assert "ALL PRIVILEGES" in privileges
 
     def test_roles_to_privileges_custom(self, mysql_connector):
-        """Test that unknown roles are passed as-is"""
+        """Test that unknown roles are ignored"""
         privileges = mysql_connector._roles_to_privileges(["EXECUTE"])
-        assert "EXECUTE" in privileges
+        assert len(privileges) == 0
 
     def test_roles_to_privileges_multiple(self, mysql_connector):
         """Test mapping multiple roles"""
@@ -119,9 +125,9 @@ class TestPostgreSQLConnector:
         assert len(pg_roles) == 0  # superuser is handled separately
 
     def test_roles_to_pg_roles_custom(self, pg_connector):
-        """Test that unknown roles are passed as-is"""
+        """Test that unknown roles are ignored"""
         pg_roles = pg_connector._roles_to_pg_roles(["custom_role"])
-        assert "custom_role" in pg_roles
+        assert len(pg_roles) == 0
 
 
 class TestRoleMappings:
