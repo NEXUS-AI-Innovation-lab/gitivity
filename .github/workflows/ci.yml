@@ -10,6 +10,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: "postgresql://gateway:gateway_secret@localhost:5430/gateway_iam"
+      BROKER_TYPE: "rabbitmq"
+      RABBITMQ_HOST: "localhost"
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: "guest"
+      RABBITMQ_PASSWORD: "guest"
+      RABBITMQ_QUEUE: "gateway-iam-provisioning"
+      REDIS_URL: "redis://localhost:6379"
+      N8N_VALIDATION_WEBHOOK_URL: "http://localhost:8101/webhook/validation"
+      N8N_NOTIFICATION_WEBHOOK_URL: "http://localhost:8101/webhook/notification"
+      RETRY_MAX_ATTEMPTS: 3
+      RETRY_INITIAL_DELAY: 5
+      RETRY_BACKOFF_MULTIPLIER: 2.0
+      RETRY_MAX_DELAY: 300
+      LOG_LEVEL: "DEBUG"
+      API_HOST: "0.0.0.0"
+      API_PORT: 8100
+
     steps:
       - uses: actions/checkout@v4
 
