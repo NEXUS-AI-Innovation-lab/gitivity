@@ -28,7 +28,6 @@ class TestConnectorFactory:
         """Test that unsupported service raises error"""
         from app.core.connectors.ldap_connector import LDAPConnector
 
-        original = ConnectorFactory._connectors.copy()
         ConnectorFactory._connectors.pop(TargetService.LDAP)
         try:
             with pytest.raises(ConnectorNotFoundError):
