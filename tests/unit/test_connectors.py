@@ -22,10 +22,14 @@ class TestConnectorFactory:
         assert isinstance(connector, PostgreSQLConnector)
 
     def test_create_unsupported_service(self):
-        """Test that unsupported service raises error"""
-        # LDAP is defined but not implemented
-        with pytest.raises(ConnectorNotFoundError):
-            ConnectorFactory.create(TargetService.LDAP)
+        """Test that unsupported service raises error when removed from factory"""
+        from app.core.connectors.ldap_connector import LDAPConnector
+        ConnectorFactory._connectors.pop(TargetService.LDAP, None)
+        try:
+            with pytest.raises(ConnectorNotFoundError):
+                ConnectorFactory.create(TargetService.LDAP)
+        finally:
+            ConnectorFactory._connectors[TargetService.LDAP] = LDAPConnector
 
     def test_get_available_services(self):
         """Test getting available services"""
@@ -37,7 +41,7 @@ class TestConnectorFactory:
     def test_is_service_available(self):
         """Test checking service availability"""
         assert ConnectorFactory.is_service_available(TargetService.MYSQL) is True
-        assert ConnectorFactory.is_service_available(TargetService.LDAP) is False
+        assert ConnectorFactory.is_service_available(TargetService.LDAP) is True
 
     def test_get_connector_convenience_function(self):
         """Test get_connector convenience function"""
