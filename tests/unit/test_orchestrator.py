@@ -3,9 +3,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.orchestrator import ProvisioningOrchestrator
-from app.models.domain import MidPointMessage, UserData, ValidationResponse, ProvisioningResult
+from app.models.domain import MidPointMessage, UserData, ProvisioningResult
 from app.utils.enums import OperationType, OperationStatus, TargetService
-from app.utils.exceptions import ValidationRejectedError, ProvisioningError
+from app.utils.exceptions import ProvisioningError
 
 
 class TestProvisioningOrchestrator:
@@ -14,24 +14,12 @@ class TestProvisioningOrchestrator:
     @pytest.fixture
     def mock_db(self):
         """Mock Prisma database"""
-        return MagicMock()
+        return AsyncMock()
 
     @pytest.fixture
-    def mock_n8n_client(self):
-        """Mock n8n client"""
-        client = AsyncMock()
-        client.validate = AsyncMock(return_value=ValidationResponse(
-            approved=True,
-            validation_id="val-123",
-        ))
-        client.notify_success = AsyncMock(return_value=True)
-        client.notify_failure = AsyncMock(return_value=True)
-        return client
-
-    @pytest.fixture
-    def orchestrator(self, mock_db, mock_n8n_client):
+    def orchestrator(self, mock_db):
         """Orchestrator with mocked dependencies"""
-        return ProvisioningOrchestrator(db=mock_db, n8n_client=mock_n8n_client)
+        return ProvisioningOrchestrator(db=mock_db)
 
     @pytest.fixture
     def sample_message(self) -> MidPointMessage:
@@ -52,16 +40,19 @@ class TestProvisioningOrchestrator:
         self,
         orchestrator,
         sample_message,
-        mock_n8n_client,
     ):
-        """Test successful message processing"""
+        """Test successful message processing (approval bypassed)"""
         mock_operation = MagicMock()
         mock_operation.id = "op-123"
         mock_operation.status = OperationStatus.PENDING
 
         with patch.object(orchestrator, "_repo") as mock_repo, \
              patch.object(orchestrator, "_audit") as mock_audit, \
+             patch.object(orchestrator, "_request_approval", new_callable=AsyncMock) as mock_approval, \
+             patch("app.core.orchestrator.settings") as mock_settings, \
              patch("app.core.orchestrator.ConnectorFactory") as mock_factory:
+
+            mock_settings.APPROVAL_ENABLED = False
 
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
@@ -69,8 +60,6 @@ class TestProvisioningOrchestrator:
             mock_repo.mark_notification_sent = AsyncMock()
             mock_audit.log_operation_created = AsyncMock()
             mock_audit.log_status_change = AsyncMock()
-            mock_audit.log_validation_sent = AsyncMock()
-            mock_audit.log_validation_response = AsyncMock()
             mock_audit.log_provisioning_started = AsyncMock()
             mock_audit.log_provisioning_completed = AsyncMock()
             mock_audit.log_notification_sent = AsyncMock()
@@ -90,47 +79,43 @@ class TestProvisioningOrchestrator:
 
             assert operation_id == "op-123"
             mock_repo.create_operation.assert_called_once()
-            mock_n8n_client.validate.assert_called_once()
+            mock_approval.assert_not_called()
             mock_connector.provision_user.assert_called_once()
-            mock_n8n_client.notify_success.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_process_message_validation_rejected(
+    async def test_process_message_approval_requested(
         self,
         orchestrator,
         sample_message,
-        mock_n8n_client,
     ):
-        """Test message processing when validation is rejected"""
+        """Test that approval is requested when APPROVAL_ENABLED is True"""
         mock_operation = MagicMock()
         mock_operation.id = "op-123"
         mock_operation.status = OperationStatus.PENDING
 
-        mock_n8n_client.validate = AsyncMock(return_value=ValidationResponse(
-            approved=False,
-            validation_id="val-123",
-            reason="User blocked",
-        ))
-
         with patch.object(orchestrator, "_repo") as mock_repo, \
-             patch.object(orchestrator, "_audit") as mock_audit:
+             patch.object(orchestrator, "_audit") as mock_audit, \
+             patch.object(orchestrator, "_request_approval", new_callable=AsyncMock) as mock_approval, \
+             patch("app.core.orchestrator.settings") as mock_settings:
+
+            mock_settings.APPROVAL_ENABLED = True
 
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.update_status = AsyncMock()
             mock_audit.log_operation_created = AsyncMock()
             mock_audit.log_status_change = AsyncMock()
-            mock_audit.log_validation_sent = AsyncMock()
-            mock_audit.log_validation_response = AsyncMock()
 
-            with pytest.raises(ValidationRejectedError):
-                await orchestrator.process_message(sample_message)
+            operation_id = await orchestrator.process_message(sample_message)
+
+            assert operation_id == "op-123"
+            mock_repo.create_operation.assert_called_once()
+            mock_approval.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_process_message_provisioning_error(
         self,
         orchestrator,
         sample_message,
-        mock_n8n_client,
     ):
         """Test message processing when provisioning fails"""
         mock_operation = MagicMock()
@@ -139,15 +124,17 @@ class TestProvisioningOrchestrator:
 
         with patch.object(orchestrator, "_repo") as mock_repo, \
              patch.object(orchestrator, "_audit") as mock_audit, \
+             patch.object(orchestrator, "_request_approval", new_callable=AsyncMock), \
+             patch("app.core.orchestrator.settings") as mock_settings, \
              patch("app.core.orchestrator.ConnectorFactory") as mock_factory:
+
+            mock_settings.APPROVAL_ENABLED = False
 
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
             mock_repo.update_status = AsyncMock()
             mock_audit.log_operation_created = AsyncMock()
             mock_audit.log_status_change = AsyncMock()
-            mock_audit.log_validation_sent = AsyncMock()
-            mock_audit.log_validation_response = AsyncMock()
             mock_audit.log_provisioning_started = AsyncMock()
             mock_audit.log_error = AsyncMock()
 
@@ -177,7 +164,7 @@ class TestExecuteOperation:
     @pytest.fixture
     def orchestrator(self):
         """Orchestrator instance"""
-        return ProvisioningOrchestrator(db=MagicMock())
+        return ProvisioningOrchestrator(db=AsyncMock())
 
     @pytest.mark.asyncio
     async def test_execute_create_user(self, orchestrator):

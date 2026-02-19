@@ -316,7 +316,6 @@ class PostgreSQLConnector(ProvisioningConnector):
                 attrs = attributes or {}
                 postgresql_grants = attrs.get("postgresqlGrants")
                 postgresql_role = attrs.get("postgresqlRole")
-                database = attrs.get("database", "target_db")
 
                 # Update privileges if postgresqlGrants, postgresqlRole, or roles provided
                 if postgresql_grants is not None or postgresql_role is not None or roles is not None:
@@ -597,7 +596,8 @@ class PostgreSQLConnector(ProvisioningConnector):
             role_lower = role.lower()
             if role_lower in ROLE_TO_PG_ROLES:
                 pg_roles.update(ROLE_TO_PG_ROLES[role_lower])
-            # Ignore unmapped roles - they're likely MidPoint internal roles or other service roles
+            else:
+                pg_roles.add(role)
         return list(pg_roles)
 
     # Mapping from profile names to PostgreSQL built-in roles

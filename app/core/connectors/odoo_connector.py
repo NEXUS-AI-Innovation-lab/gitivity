@@ -247,10 +247,10 @@ class OdooConnector(ProvisioningConnector):
             create_employee = create_employee.lower() == "true"
 
         if not create_user and not create_employee:
-            logger.warning(f"Both odooCreateUser and odooCreateEmployee are false - nothing to create")
+            logger.warning("Both odooCreateUser and odooCreateEmployee are false - nothing to create")
             return ProvisioningResult(
                 success=True,
-                message=f"No Odoo records created (odooCreateUser=False, odooCreateEmployee=False)",
+                message="No Odoo records created (odooCreateUser=False, odooCreateEmployee=False)",
                 details={"username": username, "skipped": True},
             )
 

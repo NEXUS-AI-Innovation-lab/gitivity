@@ -3,7 +3,6 @@ import logging
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 from prisma import Prisma
@@ -31,7 +30,7 @@ class ProvisioningOrchestrator:
     user provisioning operations received from MidPoint.
     """
 
-    def __init__(self, db: Prisma) -> None:
+    def __init__(self, db: Prisma, n8n_client=None) -> None:
         self._db = db
         self._repo = ProvisioningRepository(db)
         self._audit = AuditService(db)
@@ -145,7 +144,7 @@ class ProvisioningOrchestrator:
                 return operation_id
 
             # Step 4: Provision to target service (if approval bypassed)
-            result = await self._provision_to_target(operation_id, message)
+            await self._provision_to_target(operation_id, message)
 
             logger.info(
                 f"Operation {operation_id} completed successfully",
@@ -249,7 +248,7 @@ class ProvisioningOrchestrator:
             approval_request_id = str(uuid.uuid4())
 
             # Send approval request to Flask worker
-            worker_response = await self._send_approval_request(
+            await self._send_approval_request(
                 operation_id=operation_id,
                 request_id=approval_request_id,
                 operation_data={
@@ -491,7 +490,7 @@ class ProvisioningOrchestrator:
 
                 # Reconstruct MidPointMessage and continue to provisioning
                 message = await self._reconstruct_midpoint_message(operation)
-                result = await self._provision_to_target(operation_id, message)
+                await self._provision_to_target(operation_id, message)
 
                 # Clear rejected CREATE marker if this CREATE succeeded
                 if operation.operation_type == "CREATE_USER":

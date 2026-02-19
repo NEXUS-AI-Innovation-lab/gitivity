@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from prisma import Prisma
 
 from app.config.settings import settings
+from app.core.dead_letter_queue import DLQManager
 from app.db.repositories.provisioning_repository import ProvisioningRepository
 from app.services.audit_service import AuditService
 from app.utils.enums import OperationStatus
@@ -89,9 +90,6 @@ class RetryManager:
                 f"Max retries exceeded for operation {operation_id}",
                 extra={"operation_id": operation_id},
             )
-            # Import here to avoid circular dependency
-            from app.core.dead_letter_queue import DLQManager
-
             dlq_manager = DLQManager(self._db)
             await dlq_manager.send_to_dlq(
                 operation_id=operation_id,

@@ -6,7 +6,6 @@ from app.core.connectors.base import ProvisioningConnector
 from app.core.connectors.mysql_connector import MySQLConnector
 from app.core.connectors.postgresql_connector import PostgreSQLConnector
 from app.core.connectors.odoo_connector import OdooConnector
-from app.core.connectors.ldap_connector import LDAPConnector
 from app.utils.enums import TargetService
 from app.utils.exceptions import ConnectorNotFoundError
 
@@ -25,7 +24,6 @@ class ConnectorFactory:
         TargetService.MYSQL: MySQLConnector,
         TargetService.POSTGRESQL: PostgreSQLConnector,
         TargetService.ODOO: OdooConnector,
-        TargetService.LDAP: LDAPConnector,
     }
 
     @classmethod
