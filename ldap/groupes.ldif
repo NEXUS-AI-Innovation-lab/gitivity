@@ -1,0 +1,46 @@
+dn: ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: organizationalUnit
+ou: Groups
+
+dn: cn=Admins,ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: groupOfUniqueNames
+cn: Admins
+description: Groupe des administrateurs
+uniqueMember: uid=admin,ou=system
+
+dn: cn=developers,ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: groupOfUniqueNames
+cn: developers
+description: Developers Group
+uniqueMember: uid=admin,ou=system
+
+dn: cn=odoo-admin,ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: groupOfUniqueNames
+cn: odoo-admin
+description: Groupe administrateurs Odoo
+uniqueMember: uid=admin,ou=system
+
+dn: cn=app-users,ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: groupOfUniqueNames
+cn: app-users
+description: Application Users Group
+uniqueMember: uid=admin,ou=system
+
+dn: cn=vpn-user,ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: groupOfUniqueNames
+cn: vpn-user
+description: VPN Users Group
+uniqueMember: uid=admin,ou=system
+
+dn: cn=vpn-test,ou=Groups,dc=openmicroscopy,dc=org
+objectClass: top
+objectClass: groupOfUniqueNames
+cn: vpn-test
+description: VPN Test Group
+uniqueMember: uid=admin,ou=system

@@ -3,6 +3,7 @@ import logging
 from typing import Type
 
 from app.core.connectors.base import ProvisioningConnector
+from app.core.connectors.ldap_connector import LDAPConnector
 from app.core.connectors.mysql_connector import MySQLConnector
 from app.core.connectors.postgresql_connector import PostgreSQLConnector
 from app.core.connectors.odoo_connector import OdooConnector
@@ -21,6 +22,7 @@ class ConnectorFactory:
 
     # Registry of target service to connector class
     _connectors: dict[TargetService, Type[ProvisioningConnector]] = {
+        TargetService.LDAP: LDAPConnector,
         TargetService.MYSQL: MySQLConnector,
         TargetService.POSTGRESQL: PostgreSQLConnector,
         TargetService.ODOO: OdooConnector,

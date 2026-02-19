@@ -47,12 +47,24 @@ public class RabbitMQClient {
 
     public void publish(String jsonMessage) throws IOException {
         if (channel == null || !channel.isOpen()) {
-            throw new IOException("RabbitMQ channel is not open");
+            LOG.warn("RabbitMQ channel is not open, attempting to reconnect...");
+            try {
+                reconnect();
+            } catch (TimeoutException e) {
+                throw new IOException("Failed to reconnect to RabbitMQ: " + e.getMessage(), e);
+            }
         }
 
         String queueName = configuration.getRabbitmqQueue();
         channel.basicPublish("", queueName, null, jsonMessage.getBytes(StandardCharsets.UTF_8));
         LOG.info("Message published to RabbitMQ queue: {}", queueName);
+    }
+
+    private void reconnect() throws IOException, TimeoutException {
+        LOG.info("Reconnecting to RabbitMQ {}:{}", configuration.getRabbitmqHost(), configuration.getRabbitmqPort());
+        close();
+        init();
+        LOG.info("Reconnected to RabbitMQ successfully");
     }
 
     public void testConnection() throws IOException, TimeoutException {

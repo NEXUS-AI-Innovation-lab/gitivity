@@ -111,8 +111,12 @@ class KafkaConsumer(BrokerConsumer):
     async def _process_message(self, message: bytes) -> None:
         """Process a Kafka message"""
         try:
+            # Log raw payload before any parsing
+            raw = message.decode("utf-8")
+            logger.info(f"Raw payload received:\n{raw}")
+
             # Deserialize JSON
-            data = json.loads(message.decode("utf-8"))
+            data = json.loads(raw)
 
             # Parse into domain model
             midpoint_message = self._parse_message(data)

@@ -149,7 +149,7 @@ class RabbitMQConsumer(BrokerConsumer):
     async def _on_message(self, message: AbstractIncomingMessage) -> None:
         """Callback for incoming messages"""
         async with message.process():
-            logger.debug(
+            logger.info(
                 "Received RabbitMQ message",
                 extra={
                     "message_id": message.message_id,
@@ -161,7 +161,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 await self._process_message(message.body)
                 # Message will be auto-acked by context manager
 
-                logger.debug(
+                logger.info(
                     "Message processed and acknowledged",
                     extra={"message_id": message.message_id},
                 )
@@ -177,8 +177,12 @@ class RabbitMQConsumer(BrokerConsumer):
     async def _process_message(self, message: bytes) -> None:
         """Process a RabbitMQ message"""
         try:
+            # Log raw payload before any parsing
+            raw = message.decode("utf-8")
+            logger.info(f"Raw payload received:\n{raw}")
+
             # Deserialize JSON
-            data = json.loads(message.decode("utf-8"))
+            data = json.loads(raw)
 
             logger.info(f"Received message: {json.dumps(data, indent=2)}")
 

@@ -1,4 +1,4 @@
-<role oid="00000000-0000-0000-0000-000000000200"
+<role oid="00000000-0000-0000-0000-000000000201"
       xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
             xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3">
 
@@ -6,7 +6,7 @@
     <description>Accès Odoo ERP avec création d'employé</description>
     <inducement>
         <construction>
-            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="ResourceType"/>
+            <resourceRef oid="3447776b-105c-4663-a025-5b27568ee091" type="ResourceType"/>
             <kind>account</kind>
             <attribute>
                 <ref>ri:roles</ref>
