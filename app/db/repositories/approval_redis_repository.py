@@ -195,13 +195,11 @@ class ApprovalRedisRepository:
         """
         try:
             key = f"rejected_create:{target_service}:{username}"
-            value = json.dumps(
-                {
-                    "operation_id": operation_id,
-                    "rejected_at": datetime.now(timezone.utc).isoformat(),
-                    "reason": reason,
-                }
-            )
+            value = json.dumps({
+                "operation_id": operation_id,
+                "rejected_at": datetime.now(timezone.utc).isoformat(),
+                "reason": reason,
+            })
             ttl = 30 * 24 * 3600  # 30 days
             result = await self.redis.setex(key, ttl, value)
             logger.info(
@@ -213,7 +211,9 @@ class ApprovalRedisRepository:
             logger.error(f"Failed to store rejected CREATE marker: {e}")
             return False
 
-    async def check_rejected_create(self, username: str, target_service: str) -> bool:
+    async def check_rejected_create(
+        self, username: str, target_service: str
+    ) -> bool:
         """Check if a CREATE was previously rejected for this user+service
 
         Args:
@@ -257,7 +257,9 @@ class ApprovalRedisRepository:
             logger.error(f"Failed to store user state: {e}")
             return False
 
-    async def get_user_state(self, username: str, target_service: str) -> dict | None:
+    async def get_user_state(
+        self, username: str, target_service: str
+    ) -> dict | None:
         """Get stored user state for diff computation
 
         Args:
@@ -277,7 +279,9 @@ class ApprovalRedisRepository:
             logger.error(f"Failed to get user state: {e}")
             return None
 
-    async def clear_rejected_create(self, username: str, target_service: str) -> bool:
+    async def clear_rejected_create(
+        self, username: str, target_service: str
+    ) -> bool:
         """Clear rejected CREATE marker after successful provisioning
 
         Args:

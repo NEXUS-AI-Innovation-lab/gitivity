@@ -7,7 +7,10 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore"
     )
 
     # Application
@@ -38,12 +41,8 @@ class Settings(BaseSettings):
     KAFKA_AUTO_OFFSET_RESET: str = "earliest"
     KAFKA_ENABLE_AUTO_COMMIT: bool = True
 
-    # n8n Integration
-    N8N_ENABLED: bool = False  # Set to True to enable n8n validation/notification
-    N8N_VALIDATION_WEBHOOK_URL: str = "http://localhost:8101/webhook/validation"
-    N8N_NOTIFICATION_WEBHOOK_URL: str = "http://localhost:8101/webhook/notification"
-    N8N_TIMEOUT: int = 30  # seconds
-    N8N_RETRY_ATTEMPTS: int = 3
+    # n8n Integration (approval workflow only)
+    N8N_TIMEOUT: int = 10  # seconds
 
     # Redis Configuration
     REDIS_HOST: str = "localhost"
@@ -52,20 +51,20 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
 
     # Approval Workflow Configuration
-    APPROVAL_ENABLED: bool = True  # Set to False to bypass approval
+    APPROVAL_ENABLED: bool = True  # Set to False to bypass approval (useful in dev/test)
     APPROVAL_WORKER_URL: str = "http://localhost:5101"
-    APPROVAL_SLEEP_DURATION: int = 3600  # 1 hour in seconds (use 5 for testing)
+    APPROVAL_SLEEP_DURATION: int = 3600  # How long n8n waits for a decision before timeout
 
     # n8n Approval Workflow
     N8N_APPROVAL_WEBHOOK_URL: str = "http://localhost:5678/webhook/approval"
     ADMIN_APPROVAL_EMAIL: str = "samiourrad2005@example.com"
-    GATEWAY_EXTERNAL_URL: str = "http://localhost:8100"
+    GATEWAY_EXTERNAL_URL: str = "http://localhost:8100"  # Public URL used by n8n to call back the gateway
 
     # Retry Configuration
     RETRY_MAX_ATTEMPTS: int = 3
-    RETRY_INITIAL_DELAY: int = 5  # seconds
-    RETRY_BACKOFF_MULTIPLIER: float = 2.0
-    RETRY_MAX_DELAY: int = 300  # 5 minutes
+    RETRY_INITIAL_DELAY: int = 5  # seconds before first retry
+    RETRY_BACKOFF_MULTIPLIER: float = 2.0  # each retry waits delay * multiplier^attempt
+    RETRY_MAX_DELAY: int = 300  # cap at 5 minutes regardless of multiplier
 
     # Target Service: MySQL
     MYSQL_HOST: str = "localhost"

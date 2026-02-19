@@ -10,13 +10,14 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/approvers", tags=["approvers"])
 
+# Approvers are stored in a JSON file instead of the database to allow runtime editing
+# without schema migrations. Path resolves to gateway-iam/data/approvers.json.
 DATA_FILE = Path(__file__).resolve().parents[4] / "data" / "approvers.json"
 
 
 # ============================================================================
 # Models
 # ============================================================================
-
 
 class ApproverCreate(BaseModel):
     name: str
@@ -41,7 +42,6 @@ class ApproverResponse(BaseModel):
 # Helpers
 # ============================================================================
 
-
 def _read_approvers() -> list[dict]:
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -60,7 +60,6 @@ def _write_approvers(approvers: list[dict]) -> None:
 # Endpoints
 # ============================================================================
 
-
 @router.get("", response_model=list[ApproverResponse])
 async def list_approvers():
     """List all approvers sorted by level"""
@@ -74,7 +73,7 @@ async def create_approver(data: ApproverCreate):
     approvers = _read_approvers()
 
     approver = {
-        "id": str(uuid.uuid4())[:8],
+        "id": str(uuid.uuid4())[:8],  # Short ID for readability in JSON
         "name": data.name,
         "email": data.email,
         "level": data.level,
@@ -116,6 +115,7 @@ async def delete_approver(approver_id: str):
     original_len = len(approvers)
     approvers = [a for a in approvers if a["id"] != approver_id]
 
+    # If the list length didn't change, the approver wasn't found
     if len(approvers) == original_len:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -102,9 +102,12 @@ class LDAPConnector(ProvisioningConnector):
         """Extract base DN from a group DN
 
         Example: cn=Users,ou=Groups,dc=example,dc=com -> dc=example,dc=com
+
+        The base DN is inferred from the group DN so we don't need a separate
+        config per group. Falls back to LDAP_BASE_DN if no dc= component found.
         """
         parts = group_dn.split(",")
-        # Find where dc= starts
+        # Collect all dc= components — they form the root of the directory tree
         dc_parts = [p for p in parts if p.lower().startswith("dc=")]
         if dc_parts:
             return ",".join(dc_parts)
@@ -132,9 +135,7 @@ class LDAPConnector(ProvisioningConnector):
                 },
             )
 
-    async def _find_user_by_employee_number(
-        self, employee_number: str, base_dn: str
-    ) -> str | None:
+    async def _find_user_by_employee_number(self, employee_number: str, base_dn: str) -> str | None:
         """Find existing user by employeeNumber and return their DN"""
         if not employee_number:
             return None
@@ -198,15 +199,11 @@ class LDAPConnector(ProvisioningConnector):
             await self._ensure_users_ou_exists(base_dn)
 
             # FIRST: Check if user exists by employeeNumber (unique identifier)
-            existing_dn = await self._find_user_by_employee_number(
-                employee_number, base_dn
-            )
+            existing_dn = await self._find_user_by_employee_number(employee_number, base_dn)
 
             if existing_dn:
                 # User exists - update instead of create
-                logger.info(
-                    f"User with employeeNumber={employee_number} found at {existing_dn}, updating..."
-                )
+                logger.info(f"User with employeeNumber={employee_number} found at {existing_dn}, updating...")
                 return await self.update_user(
                     username=username,
                     password=password,
@@ -226,12 +223,7 @@ class LDAPConnector(ProvisioningConnector):
             if not self._connection.entries:
                 # Build user attributes
                 user_attributes = {
-                    "objectClass": [
-                        "inetOrgPerson",
-                        "organizationalPerson",
-                        "person",
-                        "top",
-                    ],
+                    "objectClass": ["inetOrgPerson", "organizationalPerson", "person", "top"],
                     "cn": full_name or username,
                     "sn": last_name or username,
                     "uid": username,
@@ -294,11 +286,9 @@ class LDAPConnector(ProvisioningConnector):
                         continue
 
                     group_entry = self._connection.entries[0]
-                    object_classes = [
-                        oc.lower() for oc in group_entry.objectClass.values
-                    ]
+                    object_classes = [oc.lower() for oc in group_entry.objectClass.values]
 
-                    # Determine which member attribute to use
+                    # groupOfUniqueNames uses 'uniqueMember'; groupOfNames uses 'member'
                     if "groupofuniquenames" in object_classes:
                         member_attr = "uniqueMember"
                     else:
@@ -315,11 +305,10 @@ class LDAPConnector(ProvisioningConnector):
                         continue
 
                     # Add user to group
-                    logger.info(
-                        f"Adding {user_dn} to group {group_dn} using {member_attr}"
-                    )
+                    logger.info(f"Adding {user_dn} to group {group_dn} using {member_attr}")
                     success = self._connection.modify(
-                        group_dn, {member_attr: [(MODIFY_ADD, [user_dn])]}
+                        group_dn,
+                        {member_attr: [(MODIFY_ADD, [user_dn])]}
                     )
 
                     if success:
@@ -403,11 +392,11 @@ class LDAPConnector(ProvisioningConnector):
         else:
             base_dn = settings.LDAP_BASE_DN
 
+        user_dn = f"uid={username},ou=Users,{base_dn}"
+
         try:
             # FIRST: Search for user by employeeNumber (unique identifier)
-            existing_dn = await self._find_user_by_employee_number(
-                employee_number, base_dn
-            )
+            existing_dn = await self._find_user_by_employee_number(employee_number, base_dn)
 
             if not existing_dn:
                 # SECOND: Search by uid (username)
@@ -423,9 +412,7 @@ class LDAPConnector(ProvisioningConnector):
                 # User doesn't exist in LDAP
                 if not ldap_groups:
                     # No groups to assign and user doesn't exist - nothing to do
-                    logger.info(
-                        f"User {username} not found in LDAP and no groups to assign - skipping"
-                    )
+                    logger.info(f"User {username} not found in LDAP and no groups to assign - skipping")
                     return ProvisioningResult(
                         success=True,
                         message=f"User {username} not in LDAP, no cleanup needed",
@@ -454,15 +441,11 @@ class LDAPConnector(ProvisioningConnector):
             if password:
                 changes["userPassword"] = [(MODIFY_REPLACE, [password])]
             if attrs.get("telephoneNumber"):
-                changes["telephoneNumber"] = [
-                    (MODIFY_REPLACE, [attrs["telephoneNumber"]])
-                ]
+                changes["telephoneNumber"] = [(MODIFY_REPLACE, [attrs["telephoneNumber"]])]
 
             if changes:
                 self._connection.modify(existing_dn, changes)
-                logger.info(
-                    f"Updated LDAP user attributes for {username} at {existing_dn}"
-                )
+                logger.info(f"Updated LDAP user attributes for {username} at {existing_dn}")
 
             # Update group memberships - now handles both ADD and REMOVE
             groups_added = []
@@ -470,6 +453,7 @@ class LDAPConnector(ProvisioningConnector):
             errors = []
 
             # FIRST: Get all current groups the user is a member of
+            # Search both 'member' and 'uniqueMember' to handle different schema types
             current_user_groups = []
             self._connection.search(
                 search_base=base_dn,
@@ -479,9 +463,7 @@ class LDAPConnector(ProvisioningConnector):
             )
             for entry in self._connection.entries:
                 current_user_groups.append(entry.entry_dn)
-            logger.info(
-                f"User {username} is currently member of: {current_user_groups}"
-            )
+            logger.info(f"User {username} is currently member of: {current_user_groups}")
             logger.info(f"Desired groups: {ldap_groups}")
 
             # Normalize ldapGroups for case-insensitive comparison
@@ -499,33 +481,21 @@ class LDAPConnector(ProvisioningConnector):
                         )
                         if self._connection.entries:
                             group_entry = self._connection.entries[0]
-                            object_classes = [
-                                oc.lower() for oc in group_entry.objectClass.values
-                            ]
-                            member_attr = (
-                                "uniqueMember"
-                                if "groupofuniquenames" in object_classes
-                                else "member"
-                            )
+                            object_classes = [oc.lower() for oc in group_entry.objectClass.values]
+                            member_attr = "uniqueMember" if "groupofuniquenames" in object_classes else "member"
 
                             # Remove user from group
-                            logger.info(
-                                f"Removing {existing_dn} from group {current_group_dn}"
-                            )
+                            logger.info(f"Removing {existing_dn} from group {current_group_dn}")
                             success = self._connection.modify(
                                 current_group_dn,
-                                {member_attr: [(MODIFY_DELETE, [existing_dn])]},
+                                {member_attr: [(MODIFY_DELETE, [existing_dn])]}
                             )
                             if success:
                                 groups_removed.append(current_group_dn)
-                                logger.info(
-                                    f"Removed user {username} from group {current_group_dn}"
-                                )
+                                logger.info(f"Removed user {username} from group {current_group_dn}")
                             else:
                                 error_msg = str(self._connection.result)
-                                logger.warning(
-                                    f"Failed to remove from {current_group_dn}: {error_msg}"
-                                )
+                                logger.warning(f"Failed to remove from {current_group_dn}: {error_msg}")
                                 errors.append(f"{current_group_dn}: {error_msg}")
                     except Exception as e:
                         logger.warning(f"Error removing from {current_group_dn}: {e}")
@@ -549,9 +519,7 @@ class LDAPConnector(ProvisioningConnector):
                         continue
 
                     group_entry = self._connection.entries[0]
-                    object_classes = [
-                        oc.lower() for oc in group_entry.objectClass.values
-                    ]
+                    object_classes = [oc.lower() for oc in group_entry.objectClass.values]
 
                     if "groupofuniquenames" in object_classes:
                         member_attr = "uniqueMember"
@@ -563,12 +531,14 @@ class LDAPConnector(ProvisioningConnector):
                     if hasattr(group_entry, member_attr):
                         current_members = getattr(group_entry, member_attr).values or []
 
-                    # Use existing_dn (actual DN found) instead of user_dn (expected DN)
+                    # Use existing_dn (actual DN found by search) rather than the computed
+                    # user_dn, because the user may have been renamed or moved in the tree
                     if existing_dn.lower() not in [m.lower() for m in current_members]:
                         # Add user to group using existing_dn
                         logger.info(f"Adding {existing_dn} to group {group_dn}")
                         success = self._connection.modify(
-                            group_dn, {member_attr: [(MODIFY_ADD, [existing_dn])]}
+                            group_dn,
+                            {member_attr: [(MODIFY_ADD, [existing_dn])]}
                         )
                         if success:
                             groups_added.append(group_dn)
@@ -653,9 +623,7 @@ class LDAPConnector(ProvisioningConnector):
                         continue
 
                     group_entry = self._connection.entries[0]
-                    object_classes = [
-                        oc.lower() for oc in group_entry.objectClass.values
-                    ]
+                    object_classes = [oc.lower() for oc in group_entry.objectClass.values]
 
                     if "groupofuniquenames" in object_classes:
                         member_attr = "uniqueMember"
@@ -664,7 +632,8 @@ class LDAPConnector(ProvisioningConnector):
 
                     # Remove user from group
                     success = self._connection.modify(
-                        group_dn, {member_attr: [(MODIFY_DELETE, [user_dn])]}
+                        group_dn,
+                        {member_attr: [(MODIFY_DELETE, [user_dn])]}
                     )
 
                     if success:

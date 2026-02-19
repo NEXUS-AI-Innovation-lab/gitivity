@@ -188,10 +188,11 @@ services:
       # Gmail SMTP (set in host .env or override)
       N8N_EMAIL_MODE: smtp
       N8N_SMTP_HOST: smtp.gmail.com
-      N8N_SMTP_PORT: 465
+      N8N_SMTP_PORT: 587
       N8N_SMTP_USER: ${GMAIL_USER:-}
       N8N_SMTP_PASS: ${GMAIL_APP_PASSWORD:-}
-      N8N_SMTP_SSL: "true"
+      N8N_SMTP_SSL: "false"
+      N8N_SMTP_STARTTLS: "true"
     ports:
       - "5678:5678"
     volumes:
@@ -390,6 +391,10 @@ services:
       MOCK_MODE: auto-approve
       MOCK_DELAY_MS: 0
       MOCK_REJECT_RATE: 0.3
+      N8N_SMTP_HOST: smtp.gmail.com
+      N8N_SMTP_PORT: 465
+      N8N_SMTP_USER: ${GMAIL_USER:-}
+      N8N_SMTP_PASS: ${GMAIL_APP_PASSWORD:-}
     ports:
       - "8101:8000"
     healthcheck:

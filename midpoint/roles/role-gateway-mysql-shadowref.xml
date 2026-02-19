@@ -1,15 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    Role avec shadowRef pour profil MySQL via REST Gateway
-
-    INSTRUCTIONS:
-    1. Rebuilder le connecteur (version 1.2.0-SNAPSHOT)
-    2. Redéployer le JAR dans MidPoint
-    3. Faire "Refresh Schema" sur la ressource
-    4. Aller dans Resources > Test RabbitMQ v2 > Content > Entitlement (mysqlProfile)
-    5. Cliquer "Refresh" pour découvrir les profils
-    6. Copier l'OID du shadow du profil souhaité (readonly, readwrite, admin)
-    7. Remplacer "REMPLACER_PAR_OID_DU_SHADOW_MYSQL" par cet OID
+    Role pour profil MySQL via REST Gateway (MidPoint 4.8+)
+    Utilise associationTargetSearch pour trouver le shadow par nom de profil
 -->
 <role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
       xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
@@ -18,15 +10,15 @@
       xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
       xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
-      oid="a1b2c3d4-my-prof-0000-000000000002">
+      oid="a1b2c3d4-1111-0000-0000-000000000002">
 
     <name>Gateway - MySQL Readwrite (shadowRef)</name>
-    <description>Assigne le profil MySQL "readwrite" via la REST Gateway en utilisant shadowRef</description>
+    <description>Assigne le profil MySQL "readwrite" via la REST Gateway</description>
 
     <inducement>
         <construction>
             <!-- Ressource REST Gateway RabbitMQ -->
-            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="c:ResourceType"/>
+            <resourceRef oid="3447776b-105c-4663-a025-5b27568ee091" type="c:ResourceType"/>
             <kind>account</kind>
             <intent>default</intent>
             <attribute>
@@ -37,16 +29,21 @@
                     </expression>
                 </outbound>
             </attribute>
-            <!-- Association vers le profil MySQL via shadowRef -->
+            <!-- Association vers le profil MySQL "readwrite" -->
             <association>
                 <ref>ri:mysqlProfile</ref>
                 <outbound>
                     <strength>strong</strength>
                     <expression>
-                        <value>
-                            <!-- REMPLACER par l'OID du shadow découvert après Refresh -->
-                            <shadowRef oid="f18d9364-4d8f-4a2a-b445-7c5a6a31648c" type="c:ShadowType"/>
-                        </value>
+                        <associationTargetSearch>
+                            <filter>
+                                <q:equal>
+                                    <q:path>attributes/icfs:name</q:path>
+                                    <q:value>readwrite</q:value>
+                                </q:equal>
+                            </filter>
+                            <searchStrategy>onResourceIfNeeded</searchStrategy>
+                        </associationTargetSearch>
                     </expression>
                 </outbound>
             </association>

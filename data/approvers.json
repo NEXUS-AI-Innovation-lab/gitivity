@@ -1,16 +1,10 @@
 {
   "approvers": [
     {
-      "id": "1",
-      "name": "Admin",
-      "email": "samiourrad@gmail.com",
+      "id": "3fe0352f",
+      "name": "Manager",
+      "email": "ahmedmez94320@gmail.com",
       "level": 1
-    },
-    {
-      "id": "2",
-      "name": "Admin",
-      "email": "samiourrad2005@gmail.com",
-      "level": 2
     }
   ]
 }

@@ -32,14 +32,14 @@ def setup_logging() -> None:
                 "asctime": "timestamp",
                 "name": "logger",
                 "levelname": "level",
-                "message": "message",
-            },
+                "message": "message"
+            }
         )
     else:
         # Text format for development
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
+            datefmt="%Y-%m-%d %H:%M:%S"
         )
 
     console_handler.setFormatter(formatter)
@@ -52,8 +52,8 @@ def setup_logging() -> None:
             "log_level": settings.LOG_LEVEL,
             "log_format": settings.LOG_FORMAT,
             "app_name": settings.APP_NAME,
-            "app_version": settings.APP_VERSION,
-        },
+            "app_version": settings.APP_VERSION
+        }
     )
 
 

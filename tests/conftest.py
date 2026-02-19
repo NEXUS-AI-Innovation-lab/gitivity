@@ -2,17 +2,14 @@
 import asyncio
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock
+from typing import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 
-from app.models.domain import (
-    MidPointMessage,
-    UserData,
-    ValidationResponse,
-    ProvisioningResult,
-)
-from app.utils.enums import OperationType, TargetService
+from app.models.domain import MidPointMessage, UserData, ValidationResponse, ProvisioningResult
+from app.utils.enums import OperationType, OperationStatus, TargetService
 
 
 @pytest.fixture(scope="session")
@@ -102,12 +99,10 @@ def sample_provisioning_result_failure() -> ProvisioningResult:
 def mock_n8n_client() -> AsyncMock:
     """Mock n8n client"""
     client = AsyncMock()
-    client.validate = AsyncMock(
-        return_value=ValidationResponse(
-            approved=True,
-            validation_id="val-mock",
-        )
-    )
+    client.validate = AsyncMock(return_value=ValidationResponse(
+        approved=True,
+        validation_id="val-mock",
+    ))
     client.notify_success = AsyncMock(return_value=True)
     client.notify_failure = AsyncMock(return_value=True)
     return client
@@ -121,26 +116,20 @@ def mock_connector() -> AsyncMock:
     connector.connect = AsyncMock()
     connector.disconnect = AsyncMock()
     connector.health_check = AsyncMock(return_value=True)
-    connector.provision_user = AsyncMock(
-        return_value=ProvisioningResult(
-            success=True,
-            service_user_id="testuser@%",
-            message="User created",
-        )
-    )
-    connector.update_user = AsyncMock(
-        return_value=ProvisioningResult(
-            success=True,
-            service_user_id="testuser@%",
-            message="User updated",
-        )
-    )
-    connector.delete_user = AsyncMock(
-        return_value=ProvisioningResult(
-            success=True,
-            message="User deleted",
-        )
-    )
+    connector.provision_user = AsyncMock(return_value=ProvisioningResult(
+        success=True,
+        service_user_id="testuser@%",
+        message="User created",
+    ))
+    connector.update_user = AsyncMock(return_value=ProvisioningResult(
+        success=True,
+        service_user_id="testuser@%",
+        message="User updated",
+    ))
+    connector.delete_user = AsyncMock(return_value=ProvisioningResult(
+        success=True,
+        message="User deleted",
+    ))
     connector.__aenter__ = AsyncMock(return_value=connector)
     connector.__aexit__ = AsyncMock(return_value=None)
     return connector
@@ -149,20 +138,18 @@ def mock_connector() -> AsyncMock:
 @pytest.fixture
 def sample_kafka_message() -> bytes:
     """Sample Kafka message bytes"""
-    return json.dumps(
-        {
-            "request_id": "mp-req-12345",
-            "operation_type": "CREATE_USER",
-            "target_service": "MYSQL",
-            "user_data": {
-                "username": "testuser",
-                "email": "testuser@example.com",
-                "password": "SecureP@ss123",
-                "roles": ["read"],
-            },
-            "metadata": {"source": "test"},
-        }
-    ).encode("utf-8")
+    return json.dumps({
+        "request_id": "mp-req-12345",
+        "operation_type": "CREATE_USER",
+        "target_service": "MYSQL",
+        "user_data": {
+            "username": "testuser",
+            "email": "testuser@example.com",
+            "password": "SecureP@ss123",
+            "roles": ["read"],
+        },
+        "metadata": {"source": "test"},
+    }).encode("utf-8")
 
 
 @pytest.fixture

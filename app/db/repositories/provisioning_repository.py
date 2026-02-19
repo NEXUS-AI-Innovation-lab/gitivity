@@ -1,8 +1,9 @@
 """Repository for ProvisioningOperation model"""
+import json
 from datetime import datetime
 from typing import Any
 
-from prisma import Json
+from prisma import Prisma, Json
 from prisma.models import ProvisioningOperation
 from prisma.enums import OperationStatus, OperationType, TargetService
 

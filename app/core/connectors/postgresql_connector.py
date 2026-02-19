@@ -12,7 +12,9 @@ from app.utils.exceptions import ConnectorConnectionError, ProvisioningError
 
 logger = logging.getLogger(__name__)
 
-# Mapping from role names to PostgreSQL roles/privileges
+# Mapping from MidPoint role names to built-in PostgreSQL roles (pg_read_all_data etc.)
+# These are PostgreSQL 14+ system roles — not user-created roles.
+# "superuser" maps to [] because the SUPERUSER attribute is set via ALTER ROLE, not GRANT.
 ROLE_TO_PG_ROLES: dict[str, list[str]] = {
     "read": ["pg_read_all_data"],
     "write": ["pg_write_all_data"],
@@ -167,9 +169,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                                 )
                                 logger.debug(f"Granted {pg_role} to {username}")
                             except asyncpg.UndefinedObjectError:
-                                logger.warning(
-                                    f"PostgreSQL role {pg_role} does not exist"
-                                )
+                                logger.warning(f"PostgreSQL role {pg_role} does not exist")
                     else:
                         # Direct SQL privileges → grant on tables
                         privileges = self._parse_grants(postgresql_grants)
@@ -182,18 +182,14 @@ class PostgreSQLConnector(ProvisioningConnector):
                                 await conn.execute(
                                     f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT {privilege} ON TABLES TO "{escaped_username}"'
                                 )
-                                logger.debug(
-                                    f"Granted {privilege} on tables to {username}"
-                                )
+                                logger.debug(f"Granted {privilege} on tables to {username}")
                             except Exception as e:
                                 logger.warning(f"Failed to grant {privilege}: {e}")
 
                 # Priority 2: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
                 elif postgresql_role:
                     pg_roles = self._roles_to_pg_roles([postgresql_role])
-                    logger.info(
-                        f"Using postgresqlRole attribute '{postgresql_role}': {pg_roles}"
-                    )
+                    logger.info(f"Using postgresqlRole attribute '{postgresql_role}': {pg_roles}")
                     for pg_role in pg_roles:
                         try:
                             await conn.execute(
@@ -290,7 +286,7 @@ class PostgreSQLConnector(ProvisioningConnector):
             escaped_password = password.replace("'", "''") if password else "changeme"
             async with self._pool.acquire() as conn:
                 await conn.execute(
-                    f"CREATE ROLE \"{escaped_username}\" WITH LOGIN PASSWORD '{escaped_password}'"
+                    f'CREATE ROLE "{escaped_username}" WITH LOGIN PASSWORD \'{escaped_password}\''
                 )
             logger.info(f"Created PostgreSQL role: {username}")
 
@@ -320,13 +316,11 @@ class PostgreSQLConnector(ProvisioningConnector):
                 attrs = attributes or {}
                 postgresql_grants = attrs.get("postgresqlGrants")
                 postgresql_role = attrs.get("postgresqlRole")
+                database = attrs.get("database", "target_db")
+
                 # Update privileges if postgresqlGrants, postgresqlRole, or roles provided
-                if (
-                    postgresql_grants is not None
-                    or postgresql_role is not None
-                    or roles is not None
-                ):
-                    # Revoke existing role memberships
+                if postgresql_grants is not None or postgresql_role is not None or roles is not None:
+                    # Revoke all current role memberships before re-granting to avoid stale privileges
                     current_roles = await conn.fetch(
                         """
                         SELECT r.rolname
@@ -354,9 +348,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                         pg_roles = self._resolve_profile_roles(postgresql_grants)
                         if pg_roles:
                             # Profile name detected → use PostgreSQL role membership
-                            logger.info(
-                                f"Updating with postgresqlGrants profile: {pg_roles}"
-                            )
+                            logger.info(f"Updating with postgresqlGrants profile: {pg_roles}")
                             for pg_role in pg_roles:
                                 try:
                                     await conn.execute(
@@ -364,9 +356,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                                     )
                                     logger.debug(f"Granted {pg_role} to {username}")
                                 except asyncpg.UndefinedObjectError:
-                                    logger.warning(
-                                        f"PostgreSQL role {pg_role} does not exist"
-                                    )
+                                    logger.warning(f"PostgreSQL role {pg_role} does not exist")
                         else:
                             # Direct SQL privileges → grant on tables
                             privileges = self._parse_grants(postgresql_grants)
@@ -385,18 +375,14 @@ class PostgreSQLConnector(ProvisioningConnector):
                                     await conn.execute(
                                         f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT {privilege} ON TABLES TO "{escaped_username}"'
                                     )
-                                    logger.debug(
-                                        f"Granted {privilege} on tables to {username}"
-                                    )
+                                    logger.debug(f"Granted {privilege} on tables to {username}")
                                 except Exception as e:
                                     logger.warning(f"Failed to grant {privilege}: {e}")
 
                     # Priority 2: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
                     elif postgresql_role:
                         pg_roles = self._roles_to_pg_roles([postgresql_role])
-                        logger.info(
-                            f"Updating with postgresqlRole '{postgresql_role}': {pg_roles}"
-                        )
+                        logger.info(f"Updating with postgresqlRole '{postgresql_role}': {pg_roles}")
                         for pg_role in pg_roles:
                             try:
                                 await conn.execute(
@@ -404,9 +390,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                                 )
                                 logger.debug(f"Granted {pg_role} to {username}")
                             except asyncpg.UndefinedObjectError:
-                                logger.warning(
-                                    f"PostgreSQL role {pg_role} does not exist"
-                                )
+                                logger.warning(f"PostgreSQL role {pg_role} does not exist")
 
                     # Priority 3: Grant predefined roles based on role mapping
                     elif roles is not None:
@@ -417,9 +401,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                                     f'GRANT "{pg_role}" TO "{escaped_username}"'
                                 )
                             except asyncpg.UndefinedObjectError:
-                                logger.warning(
-                                    f"PostgreSQL role {pg_role} does not exist"
-                                )
+                                logger.warning(f"PostgreSQL role {pg_role} does not exist")
 
                 # Update comment with email if provided
                 if email:
@@ -571,7 +553,9 @@ class PostgreSQLConnector(ProvisioningConnector):
 
                 # Step 7: Drop remaining owned objects in current database
                 try:
-                    await conn.execute(f'DROP OWNED BY "{escaped_username}" CASCADE')
+                    await conn.execute(
+                        f'DROP OWNED BY "{escaped_username}" CASCADE'
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to drop owned objects: {e}")
 
@@ -635,7 +619,8 @@ class PostgreSQLConnector(ProvisioningConnector):
             if item_lower in self.PROFILE_TO_PG_ROLES:
                 all_roles.update(self.PROFILE_TO_PG_ROLES[item_lower])
             else:
-                return None  # Not a profile name, fall back to SQL privileges
+                # Any unrecognized item means the entire grants value is raw SQL, not a profile
+                return None  # Fall back to _parse_grants() for direct SQL privileges
         return list(all_roles) if all_roles else None
 
     # Mapping from profile names to SQL privileges

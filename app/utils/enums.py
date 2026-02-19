@@ -16,7 +16,13 @@ class OperationType(str, Enum):
 
 
 class OperationStatus(str, Enum):
-    """Status of a provisioning operation"""
+    """Status of a provisioning operation.
+
+    State machine transitions:
+      PENDING → VALIDATING → VALIDATED → APPROVAL_PENDING → PROCESSING → SUCCESS
+                                                          ↘ FAILED
+      Any state → RETRYING → (retries same state) → DLQ (max retries exceeded)
+    """
 
     PENDING = "PENDING"  # Initial state when message received
     VALIDATING = "VALIDATING"  # Calling n8n for validation

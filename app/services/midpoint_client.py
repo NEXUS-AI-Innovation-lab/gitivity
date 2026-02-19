@@ -22,14 +22,9 @@ class MidPointClient:
         password: str | None = None,
         timeout: int = 30,
     ):
-        self.base_url = (
-            base_url
-            or getattr(settings, "MIDPOINT_URL", "http://localhost:8080/midpoint")
-        ).rstrip("/")
-        self.username = username or getattr(
-            settings, "MIDPOINT_USERNAME", "administrator"
-        )
-        self.password = password or getattr(settings, "MIDPOINT_PASSWORD", "5ecr3t")
+        self.base_url = (base_url or getattr(settings, 'MIDPOINT_URL', 'http://localhost:8080/midpoint')).rstrip('/')
+        self.username = username or getattr(settings, 'MIDPOINT_USERNAME', 'administrator')
+        self.password = password or getattr(settings, 'MIDPOINT_PASSWORD', '5ecr3t')
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
@@ -43,7 +38,7 @@ class MidPointClient:
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/json",
-                },
+                }
             )
         return self._client
 
@@ -58,12 +53,7 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.get("/ws/rest")
-            return response.status_code in (
-                200,
-                401,
-                403,
-                404,
-            )  # Any response means MidPoint is up
+            return response.status_code in (200, 401, 403, 404)  # Any response means MidPoint is up
         except Exception as e:
             logger.debug(f"MidPoint health check failed: {e}")
             return False
@@ -77,7 +67,8 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.get(
-                "/ws/rest/resources", headers={"Accept": "application/json"}
+                "/ws/rest/resources",
+                headers={"Accept": "application/json"}
             )
             response.raise_for_status()
 
@@ -88,9 +79,7 @@ class MidPointClient:
                 resources = data["object"]
             return resources
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Failed to fetch MidPoint resources: {e.response.status_code}"
-            )
+            logger.error(f"Failed to fetch MidPoint resources: {e.response.status_code}")
             raise
         except Exception as e:
             logger.error(f"Error fetching MidPoint resources: {e}")
@@ -108,14 +97,13 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.get(
-                f"/ws/rest/resources/{oid}", headers={"Accept": "application/json"}
+                f"/ws/rest/resources/{oid}",
+                headers={"Accept": "application/json"}
             )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Failed to fetch MidPoint resource {oid}: {e.response.status_code}"
-            )
+            logger.error(f"Failed to fetch MidPoint resource {oid}: {e.response.status_code}")
             raise
         except Exception as e:
             logger.error(f"Error fetching MidPoint resource {oid}: {e}")
@@ -133,22 +121,25 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.post(
-                f"/ws/rest/resources/{oid}/test", headers={"Accept": "application/json"}
+                f"/ws/rest/resources/{oid}/test",
+                headers={"Accept": "application/json"}
             )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Failed to test MidPoint resource {oid}: {e.response.status_code}"
-            )
+            logger.error(f"Failed to test MidPoint resource {oid}: {e.response.status_code}")
             return {
                 "success": False,
                 "error": f"HTTP {e.response.status_code}",
-                "message": str(e),
+                "message": str(e)
             }
         except Exception as e:
             logger.error(f"Error testing MidPoint resource {oid}: {e}")
-            return {"success": False, "error": "connection_error", "message": str(e)}
+            return {
+                "success": False,
+                "error": "connection_error",
+                "message": str(e)
+            }
 
     async def get_resource_capabilities(self, oid: str) -> dict[str, Any]:
         """Get capabilities of a resource
@@ -163,7 +154,7 @@ class MidPointClient:
             client = await self._get_client()
             response = await client.get(
                 f"/ws/rest/resources/{oid}/capabilities",
-                headers={"Accept": "application/json"},
+                headers={"Accept": "application/json"}
             )
             response.raise_for_status()
             return response.json()
@@ -171,9 +162,7 @@ class MidPointClient:
             logger.error(f"Error fetching capabilities for resource {oid}: {e}")
             return {}
 
-    async def update_resource(
-        self, oid: str, modifications: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update_resource(self, oid: str, modifications: dict[str, Any]) -> dict[str, Any]:
         """Update a resource configuration
 
         Args:
@@ -191,15 +180,13 @@ class MidPointClient:
                 json=modifications,
                 headers={
                     "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
+                    "Content-Type": "application/json"
+                }
             )
             response.raise_for_status()
             return await self.get_resource(oid)
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Failed to update MidPoint resource {oid}: {e.response.status_code}"
-            )
+            logger.error(f"Failed to update MidPoint resource {oid}: {e.response.status_code}")
             raise
         except Exception as e:
             logger.error(f"Error updating MidPoint resource {oid}: {e}")
@@ -251,9 +238,7 @@ class MidPointClient:
             data = response.json()
 
             # Log raw response keys for debugging
-            logger.debug(
-                f"MidPoint search response for {username}: {list(data.keys())}"
-            )
+            logger.debug(f"MidPoint search response for {username}: {list(data.keys())}")
 
             # Format 1: {"user": {...}}
             user = data.get("user")
@@ -289,16 +274,12 @@ class MidPointClient:
                 if isinstance(objs, list) and len(objs) > 0:
                     return objs[0]
 
-            logger.info(
-                f"User not found in MidPoint: {username} (response keys: {list(data.keys())})"
-            )
+            logger.info(f"User not found in MidPoint: {username} (response keys: {list(data.keys())})")
             return None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None
-            logger.error(
-                f"Failed to search MidPoint user {username}: {e.response.status_code}"
-            )
+            logger.error(f"Failed to search MidPoint user {username}: {e.response.status_code}")
             return None
         except Exception as e:
             logger.error(f"Error searching MidPoint user {username}: {e}")
@@ -389,7 +370,9 @@ class MidPointClient:
                 },
             )
             response.raise_for_status()
-            logger.info(f"Successfully unassigned role {role_oid} from user {user_oid}")
+            logger.info(
+                f"Successfully unassigned role {role_oid} from user {user_oid}"
+            )
             return True
         except Exception as e:
             logger.error(

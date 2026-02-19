@@ -1,94 +1,181 @@
-# Gitivity — Gateway IAM
+# Gateway IAM
 
-Passerelle de provisionnement d'identités entre **MidPoint** et des services cibles (LDAP, MySQL, PostgreSQL, Odoo).
-MidPoint envoie des opérations via RabbitMQ → la gateway les traite, soumet une validation à n8n, puis provisionne les utilisateurs.
+API de provisionnement IAM pour MidPoint. Reçoit des messages via RabbitMQ, coordonne la validation avec n8n, provisionne les utilisateurs vers des services cibles (MySQL, PostgreSQL, Odoo), et gère un système complet de retry et audit.
 
 ## Architecture
 
 ```
-MidPoint → [Connecteur Java] → RabbitMQ → Gateway Consumer
-                                                ↓
-                                          n8n (validation / notification)
-                                                ↓
-                                    Cibles : LDAP / MySQL / PostgreSQL / Odoo
-                                                ↓
-                                        PostgreSQL (audit) + Redis (état)
+MidPoint → RabbitMQ → Gateway IAM → n8n (validation)
+                            ↓
+                      Target Service (MySQL/PostgreSQL/Odoo)
+                            ↓
+                      n8n (notification)
+                            ↓
+                      PostgreSQL (audit + state)
 ```
 
-## Services (Docker)
+## Stack Technique
 
-| Service            | Port(s)         | Description                        |
-|--------------------|-----------------|------------------------------------|
-| Gateway API        | `8100`          | FastAPI — orchestrateur principal  |
-| Gateway HTTP       | `5100`          | Flask — entitlements pour MidPoint |
-| Approval Worker    | `5101`          | Simulateur workflow d'approbation  |
-| n8n                | `5678`          | Automatisation des workflows       |
-| RabbitMQ           | `5672` `15672`  | Broker de messages                 |
-| PostgreSQL (IAM)   | `5430`          | Base de données principale         |
-| Redis              | `6379`          | Suivi de l'état des approbations   |
-| MidPoint           | `8080`          | IAM (profil `midpoint`)            |
-| LDAP (ApacheDS)    | `10389`         | Cible (profil `targets`)           |
-| MySQL              | `3306`          | Cible (profil `targets`)           |
-| PostgreSQL (cible) | `5433`          | Cible (profil `targets`)           |
-| Odoo               | `8069`          | Cible (profil `targets`)           |
+- **Python 3.11+**
+- **FastAPI** - API REST
+- **Prisma** - ORM avec PostgreSQL
+- **aio_pika** - Consumer RabbitMQ async
+- **httpx** - Client HTTP async pour n8n
 
-## Démarrage rapide
+## Prérequis
 
-```bash
-# Copier et adapter la configuration
-cp .env.example .env
+- Python 3.11+
+- PostgreSQL 15+
+- RabbitMQ 3.12+
+- n8n (pour validation et notifications)
 
-# Démarrer les services de base
-docker compose up -d
+## Installation
 
-# Avec les services cibles (LDAP, MySQL, PostgreSQL, Odoo)
-docker compose --profile targets up -d
-
-# Avec MidPoint
-docker compose --profile midpoint up -d
-```
-
-## Lancement sans Docker
+### 1. Environnement virtuel
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-# API
-uvicorn app.main:app --host 0.0.0.0 --port 8100
+### 2. Configuration
 
-# Consumer RabbitMQ (dans un autre terminal)
+```bash
+cp .env.example .env
+# Éditer .env avec votre configuration
+```
+
+### 3. Base de données
+
+```bash
+# Générer le client Prisma
+prisma generate
+
+# Appliquer les migrations
+prisma migrate dev
+```
+
+### 4. Docker (optionnel)
+
+```bash
+cd docker
+docker-compose up -d
+```
+
+Services démarrés par défaut :
+
+| Service    | Port(s)           | Description                     |
+| ---------- | ----------------- | ------------------------------- |
+| PostgreSQL | `5432`            | Base de données                 |
+| RabbitMQ   | `5672`, `15672`   | Broker + Management UI          |
+
+**RabbitMQ Management UI** : <http://localhost:15672> (guest/guest)
+
+#### Kafka (optionnel)
+
+Si vous avez besoin de Kafka au lieu de RabbitMQ :
+
+```bash
+docker-compose --profile kafka up -d
+```
+
+Cela démarre également Zookeeper et Kafka UI (port `8080`).
+
+## Lancement
+
+### API Server
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Message Consumer
+
+```bash
 python scripts/start_consumer.py
 ```
 
-## API principale
+## Interface de Gestion des Connecteurs
 
-| Endpoint                              | Méthode | Description                  |
-|---------------------------------------|---------|------------------------------|
-| `/health`                             | GET     | Health check                 |
-| `/api/v1/provisioning`                | GET     | Liste des opérations         |
-| `/api/v1/provisioning/{id}`           | GET     | Détails d'une opération      |
-| `/api/v1/provisioning/{id}/retry`     | POST    | Retry manuel                 |
-| `/api/v1/audit/{operation_id}`        | GET     | Journal d'audit              |
-| `/api/v1/connectors`                  | GET     | État des connecteurs         |
-| `/api/v1/connectors/{name}/test`      | POST    | Tester un connecteur         |
-| `/docs`                               | GET     | Swagger UI                   |
+L'application dispose d'une **interface web moderne** permettant de visualiser et configurer les connecteurs en temps réel.
 
-## Connecteur MidPoint (Java)
+### Fonctionnalités
 
-Le dossier `midpoint-connector/` contient un connecteur ConnId qui envoie les opérations MidPoint vers la gateway via RabbitMQ ou HTTP.
+| Fonctionnalité | Description |
+| -------------- | ----------- |
+| **Connecteurs Gateway** | Affiche l'état des connecteurs locaux (MySQL, PostgreSQL, Odoo, LDAP) |
+| **Connecteurs MidPoint** | Affiche les ressources (connecteurs Java) configurées dans MidPoint |
+| **Indicateurs d'état** | Pastilles colorées indiquant l'état de chaque connecteur |
+| **Configuration** | Icône de paramètres pour voir/modifier la configuration |
+| **Test de connexion** | Bouton pour tester la connectivité en un clic |
 
-```bash
-cd midpoint-connector
-./gradlew clean jar
-# JAR généré : build/libs/connector-restgateway-1.0.0-SNAPSHOT.jar
+### Accès à l'interface
 
-# Déploiement dans MidPoint Docker
-docker cp build/libs/connector-restgateway-1.0.0-SNAPSHOT.jar midpoint:/opt/midpoint/var/icf-connectors/
-docker restart midpoint
+```text
+http://localhost:8000/dashboard/connectors
 ```
 
-## Format de message RabbitMQ
+### Types de connecteurs
+
+**Connecteurs Gateway** (gérés par cette application) :
+
+- MySQL, PostgreSQL, Odoo, LDAP
+- Configuration modifiable via l'interface (runtime uniquement)
+- Test de connexion instantané
+
+**Connecteurs MidPoint** (ressources Java dans MidPoint) :
+
+- Affichage en lecture seule
+- Test de connexion via l'API MidPoint
+- Nécessite que MidPoint soit accessible (voir configuration)
+
+### Configuration MidPoint
+
+Pour afficher les connecteurs MidPoint, configurez les variables d'environnement :
+
+```bash
+MIDPOINT_URL="http://localhost:8080/midpoint"
+MIDPOINT_USERNAME="administrator"
+MIDPOINT_PASSWORD="5ecr3t"
+```
+
+## API Endpoints
+
+| Endpoint                          | Méthode | Description                        |
+| --------------------------------- | ------- | ---------------------------------- |
+| `/health`                         | GET     | Health check                       |
+| `/metrics`                        | GET     | Métriques (Prometheus-compatible)  |
+| `/api/v1/provisioning`            | GET     | Liste des opérations (avec filtres)|
+| `/api/v1/provisioning/{id}`       | GET     | Détails d'une opération            |
+| `/api/v1/provisioning/{id}/retry` | POST    | Retry manuel                       |
+| `/api/v1/audit/{operation_id}`    | GET     | Audit trail                        |
+| `/api/v1/connectors`              | GET     | Liste des connecteurs et leur état |
+| `/api/v1/connectors/{name}`       | GET     | Détails d'un connecteur            |
+| `/api/v1/connectors/{name}`       | PUT     | Modifier la configuration          |
+| `/api/v1/connectors/{name}/test`  | POST    | Tester la connexion                |
+
+Documentation interactive : `/docs` (Swagger) ou `/redoc`
+
+## Configuration
+
+Variables d'environnement principales :
+
+| Variable                       | Description              | Défaut                     |
+| ------------------------------ | ------------------------ | -------------------------- |
+| `DATABASE_URL`                 | URL PostgreSQL           | -                          |
+| `BROKER_TYPE`                  | `rabbitmq` ou `kafka`    | `rabbitmq`                 |
+| `RABBITMQ_HOST`                | Hôte RabbitMQ            | `localhost`                |
+| `RABBITMQ_PORT`                | Port RabbitMQ            | `5672`                     |
+| `RABBITMQ_QUEUE`               | Queue de messages        | `gateway-iam-provisioning` |
+| `N8N_VALIDATION_WEBHOOK_URL`   | Webhook validation n8n   | -                          |
+| `N8N_NOTIFICATION_WEBHOOK_URL` | Webhook notification n8n | -                          |
+| `RETRY_MAX_ATTEMPTS`           | Tentatives max avant DLQ | `3`                        |
+| `RETRY_BACKOFF_MULTIPLIER`     | Multiplicateur backoff   | `2.0`                      |
+
+Voir `.env.example` pour la liste complète.
+
+## Format des Messages
 
 ```json
 {
@@ -100,31 +187,45 @@ docker restart midpoint
     "email": "john@example.com",
     "password": "SecurePass123!",
     "roles": ["read", "write"]
-  }
+  },
+  "metadata": {}
 }
 ```
 
-`operation_type` : `CREATE_USER`, `UPDATE_USER`, `DELETE_USER`
-`target_service` : `MYSQL`, `POSTGRESQL`, `ODOO`, `LDAP`
+**operation_type** : `CREATE_USER`, `UPDATE_USER`, `DELETE_USER`, `CREATE_ROLE`, etc.
+
+**target_service** : `MYSQL`, `POSTGRESQL`, `ODOO`
 
 ## Tests
 
 ```bash
-pytest                          # tous les tests
-pytest tests/unit/              # tests unitaires uniquement
-pytest --cov=app                # avec couverture
+# Tous les tests
+pytest
+
+# Tests unitaires uniquement
+pytest tests/unit/
+
+# Avec couverture
+pytest --cov=app --cov-report=html
 ```
 
-## Variables d'environnement principales
+## Développement
 
-| Variable                       | Description                   | Défaut                       |
-|--------------------------------|-------------------------------|------------------------------|
-| `DATABASE_URL`                 | URL PostgreSQL                | —                            |
-| `RABBITMQ_HOST`                | Hôte RabbitMQ                 | `localhost`                  |
-| `RABBITMQ_QUEUE`               | Queue de messages             | `gateway-iam-provisioning`   |
-| `N8N_VALIDATION_WEBHOOK_URL`   | Webhook validation n8n        | —                            |
-| `N8N_NOTIFICATION_WEBHOOK_URL` | Webhook notification n8n      | —                            |
-| `RETRY_MAX_ATTEMPTS`           | Tentatives max avant DLQ      | `3`                          |
-| `MIDPOINT_URL`                 | URL MidPoint                  | `http://localhost:8080/midpoint` |
+### GitFlow
 
-Voir `.env.example` pour la liste complète.
+- `main` : Production
+- `develop` : Intégration
+- `feature/*` : Nouvelles fonctionnalités
+- `bugfix/*` : Corrections
+
+### Ajouter un nouveau connecteur
+
+1. Créer `app/core/connectors/<service>_connector.py`
+2. Hériter de `ProvisioningConnector`
+3. Implémenter : `provision_user()`, `update_user()`, `delete_user()`, `health_check()`
+4. Enregistrer dans `ConnectorFactory._connectors`
+5. Ajouter `TargetService` enum si nécessaire
+
+## License
+
+MIT

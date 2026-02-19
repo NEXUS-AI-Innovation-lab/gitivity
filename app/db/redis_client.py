@@ -29,9 +29,7 @@ class RedisClient:
                 cls._instance = redis.Redis(
                     host=settings.REDIS_HOST,
                     port=settings.REDIS_PORT,
-                    password=settings.REDIS_PASSWORD
-                    if settings.REDIS_PASSWORD
-                    else None,
+                    password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
                     db=settings.REDIS_DB,
                     decode_responses=True,  # Auto-decode bytes to strings
                     socket_connect_timeout=5,

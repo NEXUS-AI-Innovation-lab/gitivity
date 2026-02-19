@@ -3,6 +3,7 @@ import logging
 import traceback
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 from prisma import Prisma
@@ -14,13 +15,11 @@ from app.db.repositories.approval_redis_repository import ApprovalRedisRepositor
 from app.db.repositories.provisioning_repository import ProvisioningRepository
 from app.models.domain import MidPointMessage, ProvisioningResult
 from app.services.audit_service import AuditService
-from app.services.n8n_client import N8NClient
 from app.utils.enums import OperationStatus, OperationType, TargetService
-from app.utils.exceptions import (
-    ProvisioningError,
-    ValidationRejectedError,
-    ValidationTimeoutError,
-)
+from app.utils.exceptions import ProvisioningError
+
+# NOTE: n8n est utilisé UNIQUEMENT pour l'approbation (approval-workflow).
+# Les workflows validation et notification ont été supprimés.
 
 logger = logging.getLogger(__name__)
 
@@ -32,21 +31,10 @@ class ProvisioningOrchestrator:
     user provisioning operations received from MidPoint.
     """
 
-    def __init__(
-        self,
-        db: Prisma,
-        n8n_client: N8NClient | None = None,
-    ) -> None:
-        """Initialize orchestrator
-
-        Args:
-            db: Prisma database client
-            n8n_client: Optional n8n client (uses default if not provided)
-        """
+    def __init__(self, db: Prisma) -> None:
         self._db = db
         self._repo = ProvisioningRepository(db)
         self._audit = AuditService(db)
-        self._n8n = n8n_client or N8NClient()
         self._approval_redis_repo: ApprovalRedisRepository | None = None
 
     async def _get_approval_repo(self) -> ApprovalRedisRepository:
@@ -93,11 +81,9 @@ class ProvisioningOrchestrator:
                 },
             )
 
-            # Check if a previous CREATE was rejected for this user+service
-            if message.operation_type in (
-                OperationType.UPDATE_USER,
-                OperationType.DELETE_USER,
-            ):
+            # If a previous CREATE was rejected, the user doesn't exist on the target service.
+            # DELETE is a no-op; UPDATE must be converted to CREATE to re-attempt provisioning.
+            if message.operation_type in (OperationType.UPDATE_USER, OperationType.DELETE_USER):
                 approval_repo = await self._get_approval_repo()
                 username = message.user_data.username
                 target_svc = message.target_service.value
@@ -146,32 +132,20 @@ class ProvisioningOrchestrator:
                 except Exception as e:
                     logger.warning(f"Failed to check for changes, proceeding: {e}")
 
-            # Step 2: Validate with n8n (skip if disabled)
-            if settings.N8N_ENABLED:
-                await self._validate_with_n8n(operation_id, message)
-            else:
-                # Bypass validation - go directly to VALIDATED
-                await self._bypass_validation(operation_id)
+            # Step 2: Mark as VALIDATED directly (no n8n validation workflow)
+            await self._mark_validated(operation_id)
 
-            # Step 3: Request approval from Flask worker (if enabled)
+            # Step 3: Request approval via n8n approval workflow
             if settings.APPROVAL_ENABLED:
                 await self._request_approval(operation_id, message)
-                # Return control here - approval callback will continue the flow
                 logger.info(
                     f"Operation {operation_id} sent for approval. Waiting for callback.",
                     extra={"operation_id": operation_id},
                 )
                 return operation_id
 
-            # Step 4: Provision to target service
-            # This will be reached either:
-            # - If APPROVAL_ENABLED=False (bypass approval)
-            # - Via process_approval_response() after approval granted
+            # Step 4: Provision to target service (if approval bypassed)
             result = await self._provision_to_target(operation_id, message)
-
-            # Step 5: Send success notification (skip if n8n disabled)
-            if settings.N8N_ENABLED:
-                await self._notify_success(operation_id, message, result)
 
             logger.info(
                 f"Operation {operation_id} completed successfully",
@@ -179,23 +153,6 @@ class ProvisioningOrchestrator:
             )
 
             return operation_id
-
-        except ValidationRejectedError as e:
-            # Validation was rejected - this is not retriable
-            if operation_id:
-                await self._handle_validation_rejected(operation_id, message, e)
-            raise
-
-        except ValidationTimeoutError as e:
-            # Validation timed out - this might be retriable
-            if operation_id:
-                await self._handle_error(
-                    operation_id,
-                    message,
-                    e,
-                    is_retriable=True,
-                )
-            raise
 
         except ProvisioningError as e:
             # Provisioning failed
@@ -239,76 +196,17 @@ class ProvisioningOrchestrator:
 
         return operation
 
-    async def _bypass_validation(self, operation_id: str) -> None:
-        """Bypass n8n validation when N8N_ENABLED=False"""
-        logger.info(
-            f"Bypassing n8n validation for operation {operation_id}",
-            extra={"operation_id": operation_id},
-        )
-
-        # Update status directly to VALIDATED
+    async def _mark_validated(self, operation_id: str) -> None:
+        """Mark operation as VALIDATED directly (no validation workflow)"""
         await self._repo.update_status(
             id=operation_id,
             status=OperationStatus.VALIDATED,
         )
-
         await self._audit.log_status_change(
             operation_id=operation_id,
             old_status=OperationStatus.PENDING,
             new_status=OperationStatus.VALIDATED,
-            message="Validation bypassed (N8N_ENABLED=false)",
-        )
-
-    async def _validate_with_n8n(
-        self,
-        operation_id: str,
-        message: MidPointMessage,
-    ) -> None:
-        """Send validation request to n8n and process response"""
-        # Update status to VALIDATING
-        await self._update_status(
-            operation_id,
-            OperationStatus.PENDING,
-            OperationStatus.VALIDATING,
-        )
-
-        await self._audit.log_validation_sent(operation_id)
-
-        # Call n8n validation webhook
-        response = await self._n8n.validate(
-            operation_id=operation_id,
-            request_id=message.request_id,
-            operation_type=message.operation_type,
-            target_service=message.target_service,
-            user_data=message.user_data.model_dump(),
-            metadata=message.metadata,
-        )
-
-        await self._audit.log_validation_response(
-            operation_id=operation_id,
-            approved=response.approved,
-            reason=response.reason,
-            validation_id=response.validation_id,
-        )
-
-        if not response.approved:
-            raise ValidationRejectedError(
-                operation_id=operation_id,
-                reason=response.reason,
-                validation_response=response.model_dump(),
-            )
-
-        # Update status to VALIDATED
-        await self._repo.update_status(
-            id=operation_id,
-            status=OperationStatus.VALIDATED,
-            validation_response=response.model_dump(),
-        )
-
-        await self._audit.log_status_change(
-            operation_id=operation_id,
-            old_status=OperationStatus.VALIDATING,
-            new_status=OperationStatus.VALIDATED,
+            message="Auto-validated (no validation workflow)",
         )
 
     async def _request_approval(
@@ -334,8 +232,9 @@ class ProvisioningOrchestrator:
             # Get approval repository
             approval_repo = await self._get_approval_repo()
 
-            # Add to Redis with complete MidPoint data
-            # Use mode="json" to ensure datetime objects are serialized properly
+            # Store the full MidPoint message in Redis so it can be reconstructed after the
+            # callback arrives (which may be hours later, after the API process restarts).
+            # mode="json" ensures datetime objects are JSON-serializable.
             await approval_repo.add_pending_approval(
                 operation_id,
                 {
@@ -350,7 +249,7 @@ class ProvisioningOrchestrator:
             approval_request_id = str(uuid.uuid4())
 
             # Send approval request to Flask worker
-            await self._send_approval_request(
+            worker_response = await self._send_approval_request(
                 operation_id=operation_id,
                 request_id=approval_request_id,
                 operation_data={
@@ -406,9 +305,7 @@ class ProvisioningOrchestrator:
         try:
             with open(data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            approvers = sorted(
-                data.get("approvers", []), key=lambda a: a.get("level", 0)
-            )
+            approvers = sorted(data.get("approvers", []), key=lambda a: a.get("level", 0))
             logger.info(f"Loaded {len(approvers)} approvers for approval chain")
             return approvers
         except Exception as e:
@@ -434,13 +331,9 @@ class ProvisioningOrchestrator:
             if field_key == "password":
                 # Don't compare passwords, just detect if set
                 if new_val and new_val != old_val:
-                    changes.append(
-                        {"field": field_label, "old": "(ancien)", "new": "(modifie)"}
-                    )
+                    changes.append({"field": field_label, "old": "(ancien)", "new": "(modifie)"})
             elif str(old_val) != str(new_val) and new_val:
-                changes.append(
-                    {"field": field_label, "old": str(old_val), "new": str(new_val)}
-                )
+                changes.append({"field": field_label, "old": str(old_val), "new": str(new_val)})
 
         # Compare roles
         old_roles = set(old_data.get("roles") or [])
@@ -453,14 +346,12 @@ class ProvisioningOrchestrator:
                 role_parts.append("Ajoutes: " + ", ".join(sorted(added)))
             if removed:
                 role_parts.append("Retires: " + ", ".join(sorted(removed)))
-            changes.append(
-                {
-                    "field": "Roles",
-                    "old": ", ".join(sorted(old_roles)) or "Aucun",
-                    "new": ", ".join(sorted(new_roles)) or "Aucun",
-                    "details": " | ".join(role_parts),
-                }
-            )
+            changes.append({
+                "field": "Roles",
+                "old": ", ".join(sorted(old_roles)) or "Aucun",
+                "new": ", ".join(sorted(new_roles)) or "Aucun",
+                "details": " | ".join(role_parts),
+            })
 
         # Compare attributes
         old_attrs = old_data.get("attributes") or {}
@@ -505,17 +396,11 @@ class ProvisioningOrchestrator:
                 target_svc = operation_data["target_service"]
                 old_state = await approval_repo.get_user_state(username, target_svc)
                 if old_state:
-                    diff = self._compute_user_diff(
-                        old_state, operation_data["user_data"]
-                    )
+                    diff = self._compute_user_diff(old_state, operation_data["user_data"])
                     payload["changes"] = diff
-                    logger.info(
-                        f"Computed {len(diff)} changes for UPDATE {username} on {target_svc}"
-                    )
+                    logger.info(f"Computed {len(diff)} changes for UPDATE {username} on {target_svc}")
                 else:
-                    logger.info(
-                        f"No previous state for {username} on {target_svc}, cannot compute diff"
-                    )
+                    logger.info(f"No previous state for {username} on {target_svc}, cannot compute diff")
             except Exception as e:
                 logger.warning(f"Failed to compute diff: {e}")
 
@@ -561,18 +446,15 @@ class ProvisioningOrchestrator:
 
             # Store approval response in database
             from prisma import Json
-
             await self._db.provisioningoperation.update(
                 where={"id": operation_id},
                 data={
-                    "approval_response": Json(
-                        {
-                            "approved": approved,
-                            "reason": reason,
-                            "worker_id": worker_id,
-                            "decided_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ),
+                    "approval_response": Json({
+                        "approved": approved,
+                        "reason": reason,
+                        "worker_id": worker_id,
+                        "decided_at": datetime.now(timezone.utc).isoformat(),
+                    }),
                     "approved_at": datetime.now(timezone.utc),
                     "approved_by": worker_id,
                     "approval_reason": reason,
@@ -619,7 +501,8 @@ class ProvisioningOrchestrator:
                             username, operation.target_service
                         )
 
-                # Store user state for future UPDATE diff detection
+                # Snapshot the provisioned state in Redis so that the next UPDATE
+                # can compute a diff and detect no-op changes without hitting the target service.
                 try:
                     username = (operation.user_data or {}).get("username", "")
                     if username:
@@ -630,10 +513,6 @@ class ProvisioningOrchestrator:
                         )
                 except Exception as e:
                     logger.warning(f"Failed to store user state for diff: {e}")
-
-                # Send success notification
-                if settings.N8N_ENABLED:
-                    await self._notify_success(operation_id, message, result)
 
                 logger.info(
                     f"Operation {operation_id} completed successfully after approval",
@@ -672,17 +551,16 @@ class ProvisioningOrchestrator:
                 # Remove from Redis
                 await approval_repo.remove_pending_approval(operation_id)
 
-                # Notify n8n of rejection
-                await self._notify_approval_rejected(operation_id, reason)
-
-                # Store rejected CREATE marker for future UPDATE/DELETE detection
+                # Mark this CREATE as rejected in Redis (TTL: 7 days).
+                # Subsequent UPDATE/DELETE messages for this user+service will detect this marker
+                # and skip or convert the operation accordingly.
                 if operation.operation_type == "CREATE_USER":
                     username = (operation.user_data or {}).get("username", "")
                     if username:
                         await approval_repo.store_rejected_create(
                             username, operation.target_service, operation_id, reason
                         )
-                    # Remove the role from MidPoint
+                    # Roll back the MidPoint role assignment so IAM stays in sync with reality
                     await self._remove_midpoint_role(operation)
 
         except Exception as e:
@@ -727,53 +605,7 @@ class ProvisioningOrchestrator:
         if operation.original_message:
             return MidPointMessage(**operation.original_message)
 
-        raise ValueError(
-            f"Cannot reconstruct MidPointMessage for operation {operation.id}"
-        )
-
-    async def _notify_approval_rejected(
-        self,
-        operation_id: str,
-        reason: str,
-    ) -> None:
-        """Notify n8n that approval was rejected"""
-        if not settings.N8N_ENABLED:
-            return
-
-        try:
-            # Get operation to retrieve original message data
-            operation = await self._repo.get_by_id(operation_id)
-            if not operation:
-                return
-
-            # Send failure notification to n8n
-            await self._n8n.notify_failure(
-                operation_id=operation_id,
-                request_id=operation.midpoint_request_id or operation.id,
-                operation_type=OperationType(operation.operation_type),
-                target_service=TargetService(operation.target_service),
-                error_message=f"Approval rejected: {reason}",
-                retry_count=0,
-                sent_to_dlq=False,
-            )
-
-            await self._repo.mark_notification_sent(operation_id)
-            await self._audit.log_notification_sent(
-                operation_id=operation_id,
-                notification_type="rejection",
-                success=True,
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"Failed to send rejection notification: {e}",
-                extra={"operation_id": operation_id},
-            )
-            await self._audit.log_notification_sent(
-                operation_id=operation_id,
-                notification_type="rejection",
-                success=False,
-            )
+        raise ValueError(f"Cannot reconstruct MidPointMessage for operation {operation.id}")
 
     async def _provision_to_target(
         self,
@@ -886,42 +718,6 @@ class ProvisioningOrchestrator:
                 is_retriable=False,
             )
 
-    async def _notify_success(
-        self,
-        operation_id: str,
-        message: MidPointMessage,
-        result: ProvisioningResult,
-    ) -> None:
-        """Send success notification to n8n"""
-        try:
-            await self._n8n.notify_success(
-                operation_id=operation_id,
-                request_id=message.request_id,
-                operation_type=message.operation_type,
-                target_service=message.target_service,
-                result=result,
-                user_data=message.user_data.model_dump(),
-            )
-
-            await self._repo.mark_notification_sent(operation_id)
-            await self._audit.log_notification_sent(
-                operation_id=operation_id,
-                notification_type="success",
-                success=True,
-            )
-
-        except Exception as e:
-            # Log but don't fail the operation
-            logger.warning(
-                f"Failed to send success notification: {e}",
-                extra={"operation_id": operation_id},
-            )
-            await self._audit.log_notification_sent(
-                operation_id=operation_id,
-                notification_type="success",
-                success=False,
-            )
-
     async def _remove_midpoint_role(self, operation) -> None:
         """Remove the MidPoint role assignment when a CREATE is rejected.
 
@@ -942,7 +738,9 @@ class ProvisioningOrchestrator:
             # 1. Find user in MidPoint
             user = await midpoint_client.search_user(username)
             if not user:
-                logger.warning(f"MidPoint user not found for role removal: {username}")
+                logger.warning(
+                    f"MidPoint user not found for role removal: {username}"
+                )
                 return
 
             user_oid = user.get("oid")
@@ -955,25 +753,27 @@ class ProvisioningOrchestrator:
             if not isinstance(assignments, list):
                 assignments = [assignments]
 
-            # 3. For each assignment, resolve the role name
+            # 3. For each assignment, resolve the role name via the MidPoint REST API
             for assignment in assignments:
                 target_ref = assignment.get("targetRef", {})
                 ref_oid = target_ref.get("oid")
                 ref_type = target_ref.get("type", "")
 
+                # Only look at role assignments (skip org/service assignments)
                 if not ref_oid or "RoleType" not in ref_type:
                     continue
 
-                # Get role name
                 role = await midpoint_client.get_role(ref_oid)
                 if not role:
                     continue
 
                 role_name = role.get("name", "")
+                # MidPoint may return name as a PolyString dict {"orig": "...", "norm": "..."}
                 if isinstance(role_name, dict):
                     role_name = role_name.get("orig", "")
 
-                # 4. Check if role name matches the target service
+                # 4. Match the role by checking if the target service name appears in the role name
+                # e.g. target_service="MYSQL" matches role name "MySQL-Admin"
                 if target_service.lower() in role_name.lower():
                     success = await midpoint_client.unassign_role(user_oid, ref_oid)
                     if success:
@@ -998,40 +798,6 @@ class ProvisioningOrchestrator:
                 f"Error removing MidPoint role for {username} "
                 f"on {target_service}: {e}"
             )
-
-    async def _handle_validation_rejected(
-        self,
-        operation_id: str,
-        message: MidPointMessage,
-        error: ValidationRejectedError,
-    ) -> None:
-        """Handle validation rejection"""
-        await self._repo.update_status(
-            id=operation_id,
-            status=OperationStatus.FAILED,
-            error_message=f"Validation rejected: {error.reason}",
-        )
-
-        await self._audit.log_status_change(
-            operation_id=operation_id,
-            old_status=OperationStatus.VALIDATING,
-            new_status=OperationStatus.FAILED,
-            message=f"Validation rejected: {error.reason}",
-        )
-
-        # Notify n8n of failure
-        try:
-            await self._n8n.notify_failure(
-                operation_id=operation_id,
-                request_id=message.request_id,
-                operation_type=message.operation_type,
-                target_service=message.target_service,
-                error_message=f"Validation rejected: {error.reason}",
-                retry_count=0,
-                sent_to_dlq=False,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send failure notification: {e}")
 
     async def _handle_error(
         self,

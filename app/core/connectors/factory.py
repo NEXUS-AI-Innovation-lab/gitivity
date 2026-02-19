@@ -63,9 +63,7 @@ class ConnectorFactory:
             connector_class: The connector class to register
         """
         cls._connectors[target_service] = connector_class
-        logger.info(
-            f"Registered connector {connector_class.__name__} for {target_service}"
-        )
+        logger.info(f"Registered connector {connector_class.__name__} for {target_service}")
 
     @classmethod
     def unregister_connector(cls, target_service: TargetService) -> None:

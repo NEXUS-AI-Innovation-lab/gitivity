@@ -1,15 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    Role avec shadowRef pour groupe LDAP via REST Gateway
-
-    INSTRUCTIONS:
-    1. Rebuilder le connecteur (version 1.2.0-SNAPSHOT)
-    2. Redéployer le JAR dans MidPoint
-    3. Faire "Refresh Schema" sur la ressource
-    4. Aller dans Resources > Test RabbitMQ v2 > Content > Entitlement (ldapGroup)
-    5. Cliquer "Refresh" pour découvrir les groupes
-    6. Copier l'OID du shadow du groupe souhaité
-    7. Remplacer "REMPLACER_PAR_OID_DU_SHADOW_LDAP_GROUP" par cet OID
+    Role pour groupe LDAP via REST Gateway (MidPoint 4.8+)
+    Utilise associationTargetSearch pour trouver le shadow par nom
 -->
 <role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
       xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
@@ -18,15 +10,15 @@
       xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
       xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
-      oid="a1b2c3d4-ldap-grp1-0000-000000000002">
+      oid="a1b2c3d4-3333-0000-0000-000000000002">
 
     <name>Gateway - Groupe LDAP Dev (shadowRef)</name>
-    <description>Assigne le groupe LDAP "Admins" via la REST Gateway en utilisant shadowRef</description>
+    <description>Assigne le groupe LDAP "Admins" via la REST Gateway</description>
 
     <inducement>
         <construction>
             <!-- Ressource REST Gateway RabbitMQ -->
-            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="c:ResourceType"/>
+            <resourceRef oid="3447776b-105c-4663-a025-5b27568ee091" type="c:ResourceType"/>
             <kind>account</kind>
             <intent>default</intent>
             <attribute>
@@ -37,16 +29,21 @@
                     </expression>
                 </outbound>
             </attribute>
-            <!-- Association vers le groupe LDAP via shadowRef -->
+            <!-- Association vers le groupe LDAP "Admins" -->
             <association>
                 <ref>ri:ldapGroup</ref>
                 <outbound>
                     <strength>strong</strength>
                     <expression>
-                        <value>
-                            <!-- Shadow du groupe LDAP "Admins" -->
-                            <shadowRef oid="3fa1e0e8-52d5-4fad-97f2-387598cdd639" type="c:ShadowType"/>
-                        </value>
+                        <associationTargetSearch>
+                            <filter>
+                                <q:equal>
+                                    <q:path>attributes/icfs:name</q:path>
+                                    <q:value>Admins</q:value>
+                                </q:equal>
+                            </filter>
+                            <searchStrategy>onResourceIfNeeded</searchStrategy>
+                        </associationTargetSearch>
                     </expression>
                 </outbound>
             </association>

@@ -3,6 +3,13 @@ set -e
 
 echo "=== Gateway IAM Entrypoint ==="
 
+# Ensure approvers.json exists (bind mount may shadow the image's copy)
+if [ ! -f /app/data/approvers.json ]; then
+    echo "Initializing missing approvers.json..."
+    mkdir -p /app/data
+    echo '{"approvers":[]}' > /app/data/approvers.json
+fi
+
 # Wait for database to be ready (retry loop)
 echo "Waiting for database..."
 for i in $(seq 1 30); do

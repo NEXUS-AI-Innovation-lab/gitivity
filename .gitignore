@@ -77,3 +77,6 @@ build/
 *.bak
 *.swp
 .temp/
+
+
+poster.html

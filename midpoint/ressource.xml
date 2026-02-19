@@ -19,7 +19,7 @@
             <gen:rabbitmqPort>5672</gen:rabbitmqPort>
             <gen:rabbitmqUsername>guest</gen:rabbitmqUsername>
             <gen:rabbitmqPassword>guest</gen:rabbitmqPassword>
-            <gen:rabbitmqQueue>midpoint-operations</gen:rabbitmqQueue>
+            <gen:rabbitmqQueue>gateway-iam-provisioning</gen:rabbitmqQueue>
             <gen:gatewayUrl>http://gateway-http:5100</gen:gatewayUrl>
         </icfc:configurationProperties>
     </connectorConfiguration>

@@ -58,6 +58,7 @@ class OdooConnector(ProvisioningConnector):
         self._common: xmlrpc.client.ServerProxy | None = None
         self._models: xmlrpc.client.ServerProxy | None = None
         self._uid: int | None = None
+        # xmlrpc.client is synchronous; we run it in a thread pool to avoid blocking the event loop
         self._executor = ThreadPoolExecutor(max_workers=3)
         self._available_langs: set[str] | None = None  # Cache for available languages
 
@@ -174,9 +175,7 @@ class OdooConnector(ProvisioningConnector):
 
         # Try to convert short code to full code
         if len(lang_value) == 2:
-            lang_value = LANG_CODE_MAPPING.get(
-                lang_value.lower(), f"{lang_value}_{lang_value.upper()}"
-            )
+            lang_value = LANG_CODE_MAPPING.get(lang_value.lower(), f"{lang_value}_{lang_value.upper()}")
 
         # Check if language is available in Odoo
         available = await self._get_available_languages()
@@ -193,7 +192,9 @@ class OdooConnector(ProvisioningConnector):
         logger.warning(f"Language {lang_value} not available in Odoo, skipping")
         return None
 
-    async def _execute(self, model: str, method: str, *args, **kwargs) -> Any:
+    async def _execute(
+        self, model: str, method: str, *args, **kwargs
+    ) -> Any:
         """Execute an Odoo model method asynchronously"""
         if not self._models or not self._uid:
             raise ProvisioningError(
@@ -232,28 +233,24 @@ class OdooConnector(ProvisioningConnector):
         - odooCreateUser: bool (default True) - create res.users record
         - odooCreateEmployee: bool (default False) - create hr.employee record
         """
-        logger.info(
-            f"DEBUG provision_user called with: username={username}, email={email}, roles={roles}"
-        )
+        logger.info(f"DEBUG provision_user called with: username={username}, email={email}, roles={roles}")
         attrs = attributes or {}
 
         # Check which models to provision to (default: user only)
         create_user = attrs.get("odooCreateUser", True)
         create_employee = attrs.get("odooCreateEmployee", False)
 
-        # Convert string "true"/"false" to boolean if needed
+        # MidPoint sends booleans as strings ("true"/"false") in some attribute mappings
         if isinstance(create_user, str):
             create_user = create_user.lower() == "true"
         if isinstance(create_employee, str):
             create_employee = create_employee.lower() == "true"
 
         if not create_user and not create_employee:
-            logger.warning(
-                "Both odooCreateUser and odooCreateEmployee are false - nothing to create"
-            )
+            logger.warning(f"Both odooCreateUser and odooCreateEmployee are false - nothing to create")
             return ProvisioningResult(
                 success=True,
-                message="No Odoo records created (odooCreateUser=False, odooCreateEmployee=False)",
+                message=f"No Odoo records created (odooCreateUser=False, odooCreateEmployee=False)",
                 details={"username": username, "skipped": True},
             )
 
@@ -303,11 +300,7 @@ class OdooConnector(ProvisioningConnector):
 
         try:
             # Handle language code conversion (fr -> fr_FR) with validation
-            lang_value = (
-                attrs.get("locale")
-                or attrs.get("preferredLanguage")
-                or attrs.get("lang")
-            )
+            lang_value = attrs.get("locale") or attrs.get("preferredLanguage") or attrs.get("lang")
             if lang_value:
                 validated_lang = await self._convert_language_code(lang_value)
                 if validated_lang:
@@ -321,62 +314,40 @@ class OdooConnector(ProvisioningConnector):
                 _ctx = {"context": {"active_test": False}}
 
                 if midpoint_uid:
+                    # MidPoint UID is stored in res.partner.ref at creation time — most reliable key
                     partner_ids = await self._execute(
-                        "res.partner",
-                        "search",
-                        [["ref", "=", midpoint_uid]],
-                        **_ctx,
+                        "res.partner", "search", [["ref", "=", midpoint_uid]], **_ctx,
                     )
                     if partner_ids:
                         found_users = await self._execute(
-                            "res.users",
-                            "search",
-                            [["partner_id", "=", partner_ids[0]]],
-                            **_ctx,
+                            "res.users", "search", [["partner_id", "=", partner_ids[0]]], **_ctx,
                         )
                         if found_users:
                             existing_user_id = found_users[0]
-                            logger.info(
-                                f"Found existing Odoo user by midpoint_uid {midpoint_uid} (id={existing_user_id})"
-                            )
+                            logger.info(f"Found existing Odoo user by midpoint_uid {midpoint_uid} (id={existing_user_id})")
 
                 # Fallback: check by login (email)
                 if not existing_user_id:
                     existing = await self._execute(
-                        "res.users",
-                        "search",
-                        [["login", "=", login]],
-                        **_ctx,
+                        "res.users", "search", [["login", "=", login]], **_ctx,
                     )
                     if existing:
                         existing_user_id = existing[0]
-                        logger.info(
-                            f"Found existing Odoo user by login {login} (id={existing_user_id})"
-                        )
+                        logger.info(f"Found existing Odoo user by login {login} (id={existing_user_id})")
 
                 # Fallback: check by username as login
                 if not existing_user_id and username != login:
                     existing = await self._execute(
-                        "res.users",
-                        "search",
-                        [["login", "=", username]],
-                        **_ctx,
+                        "res.users", "search", [["login", "=", username]], **_ctx,
                     )
                     if existing:
                         existing_user_id = existing[0]
-                        logger.info(
-                            f"Found existing Odoo user by username {username} (id={existing_user_id})"
-                        )
+                        logger.info(f"Found existing Odoo user by username {username} (id={existing_user_id})")
 
                 # If user already exists, UPDATE instead of creating a duplicate
                 if existing_user_id:
-                    logger.info(
-                        f"User already exists (id={existing_user_id}), updating instead of creating"
-                    )
-                    update_vals = {
-                        "name": display_name,
-                        "active": True,
-                    }  # Reactivate if archived
+                    logger.info(f"User already exists (id={existing_user_id}), updating instead of creating")
+                    update_vals = {"name": display_name, "active": True}  # Reactivate if archived
                     if email:
                         update_vals["login"] = login
                         update_vals["email"] = email
@@ -385,21 +356,14 @@ class OdooConnector(ProvisioningConnector):
                     for midpoint_attr, odoo_field in midpoint_to_odoo.items():
                         if midpoint_attr in attrs and attrs[midpoint_attr] is not None:
                             update_vals[odoo_field] = attrs[midpoint_attr]
-                    await self._execute(
-                        "res.users", "write", [existing_user_id], update_vals
-                    )
+                    await self._execute("res.users", "write", [existing_user_id], update_vals)
                     user_id = existing_user_id
-                    logger.info(
-                        f"Updated existing Odoo user: {username} (id={user_id})"
-                    )
+                    logger.info(f"Updated existing Odoo user: {username} (id={user_id})")
 
                     if create_employee:
                         employee_id = await self._create_employee(
-                            username=username,
-                            display_name=display_name,
-                            email=email,
-                            user_id=user_id,
-                            attrs=attrs,
+                            username=username, display_name=display_name,
+                            email=email, user_id=user_id, attrs=attrs,
                         )
 
                     return ProvisioningResult(
@@ -433,26 +397,19 @@ class OdooConnector(ProvisioningConnector):
                 user_id = await self._execute("res.users", "create", user_vals)
                 logger.info(f"Created Odoo user: {username} (id={user_id})")
 
-                # Store MidPoint UID in the partner's ref field for future lookups
+                # Store MidPoint UID in partner.ref so future UPDATE/DELETE can find this user
+                # without relying on email or name which may change
                 midpoint_uid = attrs.get("midpoint_uid")
                 if midpoint_uid:
-                    user_data = await self._execute(
-                        "res.users", "read", [user_id], ["partner_id"]
-                    )
+                    user_data = await self._execute("res.users", "read", [user_id], ["partner_id"])
                     if user_data and user_data[0].get("partner_id"):
                         partner_id = user_data[0]["partner_id"][0]
-                        await self._execute(
-                            "res.partner", "write", [partner_id], {"ref": midpoint_uid}
-                        )
-                        logger.info(
-                            f"Stored MidPoint UID {midpoint_uid} in partner ref (partner_id={partner_id})"
-                        )
+                        await self._execute("res.partner", "write", [partner_id], {"ref": midpoint_uid})
+                        logger.info(f"Stored MidPoint UID {midpoint_uid} in partner ref (partner_id={partner_id})")
 
                 # Deactivate user after creation if enabled=False
                 if deactivate_after_create:
-                    await self._execute(
-                        "res.users", "write", [user_id], {"active": False}
-                    )
+                    await self._execute("res.users", "write", [user_id], {"active": False})
                     logger.info(f"Deactivated Odoo user: {username} (id={user_id})")
 
             # Create hr.employee if requested
@@ -625,11 +582,7 @@ class OdooConnector(ProvisioningConnector):
                     update_vals[odoo_field] = attrs[midpoint_attr]
 
             # Handle language code conversion (fr -> fr_FR) with validation
-            lang_value = (
-                attrs.get("locale")
-                or attrs.get("preferredLanguage")
-                or attrs.get("lang")
-            )
+            lang_value = attrs.get("locale") or attrs.get("preferredLanguage") or attrs.get("lang")
             if lang_value:
                 validated_lang = await self._convert_language_code(lang_value)
                 if validated_lang:
@@ -820,14 +773,14 @@ class OdooConnector(ProvisioningConnector):
         group_ids: list[int] = []
         for xml_id in group_xml_ids:
             try:
-                # Parse module.name format
+                # Odoo XML IDs have the format "module.name" (e.g. "base.group_user")
                 parts = xml_id.split(".")
                 if len(parts) == 2:
                     module, name = parts
                 else:
                     module, name = "base", xml_id
 
-                # Resolve XML ID to database ID using search + read
+                # ir.model.data stores all XML ID → DB ID mappings; this is the canonical lookup
                 data_ids = await self._execute(
                     "ir.model.data",
                     "search",
@@ -942,9 +895,7 @@ class OdooConnector(ProvisioningConnector):
                 employee_vals["notes"] = f"Location: {attrs['locality']}"
 
             # Employee identification
-            employee_id_attr = attrs.get("employeeNumber") or attrs.get(
-                "personalNumber"
-            )
+            employee_id_attr = attrs.get("employeeNumber") or attrs.get("personalNumber")
             if employee_id_attr:
                 employee_vals["identification_id"] = employee_id_attr
 

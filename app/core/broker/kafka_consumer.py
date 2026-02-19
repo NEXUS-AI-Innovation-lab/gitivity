@@ -42,7 +42,7 @@ class KafkaConsumer(BrokerConsumer):
     async def start(self) -> None:
         """Start consuming messages from Kafka"""
         logger.info(
-            "Starting Kafka consumer",
+            f"Starting Kafka consumer",
             extra={
                 "bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS,
                 "topic": settings.KAFKA_TOPIC,
@@ -70,7 +70,7 @@ class KafkaConsumer(BrokerConsumer):
                     break
 
                 logger.debug(
-                    "Received Kafka message",
+                    f"Received Kafka message",
                     extra={
                         "topic": msg.topic,
                         "partition": msg.partition,
@@ -121,7 +121,7 @@ class KafkaConsumer(BrokerConsumer):
             operation_id = await self._orchestrator.process_message(midpoint_message)
 
             logger.info(
-                "Message processed successfully",
+                f"Message processed successfully",
                 extra={
                     "operation_id": operation_id,
                     "request_id": midpoint_message.request_id,
@@ -192,10 +192,8 @@ class KafkaConsumer(BrokerConsumer):
             user_data = UserData(
                 username=user_data_raw.get("username", ""),
                 email=user_data_raw.get("email"),
-                first_name=user_data_raw.get("first_name")
-                or user_data_raw.get("firstName"),
-                last_name=user_data_raw.get("last_name")
-                or user_data_raw.get("lastName"),
+                first_name=user_data_raw.get("first_name") or user_data_raw.get("firstName"),
+                last_name=user_data_raw.get("last_name") or user_data_raw.get("lastName"),
                 password=user_data_raw.get("password"),
                 roles=user_data_raw.get("roles", []),
                 attributes=user_data_raw.get("attributes", {}),

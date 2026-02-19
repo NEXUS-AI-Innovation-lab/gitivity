@@ -3,12 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.orchestrator import ProvisioningOrchestrator
-from app.models.domain import (
-    MidPointMessage,
-    UserData,
-    ValidationResponse,
-    ProvisioningResult,
-)
+from app.models.domain import MidPointMessage, UserData, ValidationResponse, ProvisioningResult
 from app.utils.enums import OperationType, OperationStatus, TargetService
 from app.utils.exceptions import ValidationRejectedError, ProvisioningError
 
@@ -25,12 +20,10 @@ class TestProvisioningOrchestrator:
     def mock_n8n_client(self):
         """Mock n8n client"""
         client = AsyncMock()
-        client.validate = AsyncMock(
-            return_value=ValidationResponse(
-                approved=True,
-                validation_id="val-123",
-            )
-        )
+        client.validate = AsyncMock(return_value=ValidationResponse(
+            approved=True,
+            validation_id="val-123",
+        ))
         client.notify_success = AsyncMock(return_value=True)
         client.notify_failure = AsyncMock(return_value=True)
         return client
@@ -66,16 +59,9 @@ class TestProvisioningOrchestrator:
         mock_operation.id = "op-123"
         mock_operation.status = OperationStatus.PENDING
 
-        with patch.object(orchestrator, "_repo") as mock_repo, patch.object(
-            orchestrator, "_audit"
-        ) as mock_audit, patch(
-            "app.core.orchestrator.ConnectorFactory"
-        ) as mock_factory, patch(
-            "app.core.orchestrator.settings"
-        ) as mock_settings:
-            mock_settings.N8N_ENABLED = True
-            mock_settings.APPROVAL_ENABLED = False
-            mock_settings.RETRY_MAX_ATTEMPTS = 3
+        with patch.object(orchestrator, "_repo") as mock_repo, \
+             patch.object(orchestrator, "_audit") as mock_audit, \
+             patch("app.core.orchestrator.ConnectorFactory") as mock_factory:
 
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
@@ -91,13 +77,11 @@ class TestProvisioningOrchestrator:
 
             # Mock connector
             mock_connector = AsyncMock()
-            mock_connector.provision_user = AsyncMock(
-                return_value=ProvisioningResult(
-                    success=True,
-                    service_user_id="testuser@%",
-                    message="Created",
-                )
-            )
+            mock_connector.provision_user = AsyncMock(return_value=ProvisioningResult(
+                success=True,
+                service_user_id="testuser@%",
+                message="Created",
+            ))
             mock_connector.__aenter__ = AsyncMock(return_value=mock_connector)
             mock_connector.__aexit__ = AsyncMock()
             mock_factory.create.return_value = mock_connector
@@ -122,20 +106,14 @@ class TestProvisioningOrchestrator:
         mock_operation.id = "op-123"
         mock_operation.status = OperationStatus.PENDING
 
-        mock_n8n_client.validate = AsyncMock(
-            return_value=ValidationResponse(
-                approved=False,
-                validation_id="val-123",
-                reason="User blocked",
-            )
-        )
+        mock_n8n_client.validate = AsyncMock(return_value=ValidationResponse(
+            approved=False,
+            validation_id="val-123",
+            reason="User blocked",
+        ))
 
-        with patch.object(orchestrator, "_repo") as mock_repo, patch.object(
-            orchestrator, "_audit"
-        ) as mock_audit, patch("app.core.orchestrator.settings") as mock_settings:
-            mock_settings.N8N_ENABLED = True
-            mock_settings.APPROVAL_ENABLED = False
-            mock_settings.RETRY_MAX_ATTEMPTS = 3
+        with patch.object(orchestrator, "_repo") as mock_repo, \
+             patch.object(orchestrator, "_audit") as mock_audit:
 
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.update_status = AsyncMock()
@@ -159,14 +137,9 @@ class TestProvisioningOrchestrator:
         mock_operation.id = "op-123"
         mock_operation.status = OperationStatus.VALIDATED
 
-        with patch.object(orchestrator, "_repo") as mock_repo, patch.object(
-            orchestrator, "_audit"
-        ) as mock_audit, patch(
-            "app.core.orchestrator.ConnectorFactory"
-        ) as mock_factory, patch("app.core.orchestrator.settings") as mock_settings:
-            mock_settings.N8N_ENABLED = True
-            mock_settings.APPROVAL_ENABLED = False
-            mock_settings.RETRY_MAX_ATTEMPTS = 3
+        with patch.object(orchestrator, "_repo") as mock_repo, \
+             patch.object(orchestrator, "_audit") as mock_audit, \
+             patch("app.core.orchestrator.ConnectorFactory") as mock_factory:
 
             mock_repo.create_operation = AsyncMock(return_value=mock_operation)
             mock_repo.get_by_id = AsyncMock(return_value=mock_operation)
@@ -210,11 +183,9 @@ class TestExecuteOperation:
     async def test_execute_create_user(self, orchestrator):
         """Test CREATE_USER operation execution"""
         mock_connector = AsyncMock()
-        mock_connector.provision_user = AsyncMock(
-            return_value=ProvisioningResult(
-                success=True,
-            )
-        )
+        mock_connector.provision_user = AsyncMock(return_value=ProvisioningResult(
+            success=True,
+        ))
 
         user_data = UserData(username="test", password="pass")
 
@@ -231,11 +202,9 @@ class TestExecuteOperation:
     async def test_execute_update_user(self, orchestrator):
         """Test UPDATE_USER operation execution"""
         mock_connector = AsyncMock()
-        mock_connector.update_user = AsyncMock(
-            return_value=ProvisioningResult(
-                success=True,
-            )
-        )
+        mock_connector.update_user = AsyncMock(return_value=ProvisioningResult(
+            success=True,
+        ))
 
         user_data = UserData(username="test")
 
@@ -252,11 +221,9 @@ class TestExecuteOperation:
     async def test_execute_delete_user(self, orchestrator):
         """Test DELETE_USER operation execution"""
         mock_connector = AsyncMock()
-        mock_connector.delete_user = AsyncMock(
-            return_value=ProvisioningResult(
-                success=True,
-            )
-        )
+        mock_connector.delete_user = AsyncMock(return_value=ProvisioningResult(
+            success=True,
+        ))
 
         user_data = UserData(username="test")
 

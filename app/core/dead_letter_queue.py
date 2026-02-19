@@ -7,8 +7,7 @@ from prisma import Prisma
 
 from app.db.repositories.provisioning_repository import ProvisioningRepository
 from app.services.audit_service import AuditService
-from app.services.n8n_client import N8NClient
-from app.utils.enums import OperationStatus, OperationType, TargetService
+from app.utils.enums import OperationStatus
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +21,10 @@ class DLQManager:
     - Manual intervention required
     """
 
-    def __init__(
-        self,
-        db: Prisma,
-        n8n_client: N8NClient | None = None,
-    ) -> None:
-        """Initialize DLQ manager
-
-        Args:
-            db: Prisma database client
-            n8n_client: Optional n8n client for notifications
-        """
+    def __init__(self, db: Prisma) -> None:
         self._db = db
         self._repo = ProvisioningRepository(db)
         self._audit = AuditService(db)
-        self._n8n = n8n_client or N8NClient()
 
     async def send_to_dlq(
         self,
@@ -102,23 +90,6 @@ class DLQManager:
             message=f"Sent to DLQ: {error_message}",
         )
 
-        # Notify n8n
-        try:
-            await self._n8n.notify_failure(
-                operation_id=operation_id,
-                request_id=operation.midpoint_request_id,
-                operation_type=OperationType(operation.operation_type),
-                target_service=TargetService(operation.target_service),
-                error_message=error_message,
-                retry_count=operation.retry_count,
-                sent_to_dlq=True,
-            )
-        except Exception as e:
-            logger.warning(
-                f"Failed to send DLQ notification: {e}",
-                extra={"operation_id": operation_id},
-            )
-
         logger.info(
             f"Operation {operation_id} sent to DLQ",
             extra={"operation_id": operation_id},
@@ -151,7 +122,9 @@ class DLQManager:
             order={"created_at": "desc"},
         )
 
-        total = await self._db.deadletterqueue.count(where=where if where else None)
+        total = await self._db.deadletterqueue.count(
+            where=where if where else None
+        )
 
         return messages, total
 
@@ -164,7 +137,9 @@ class DLQManager:
         Returns:
             The DLQ entry if found, None otherwise
         """
-        return await self._db.deadletterqueue.find_unique(where={"id": dlq_id})
+        return await self._db.deadletterqueue.find_unique(
+            where={"id": dlq_id}
+        )
 
     async def retry_from_dlq(
         self,

@@ -19,10 +19,8 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 # Models
 # ============================================================================
 
-
 class ConnectorStatus(BaseModel):
     """Status of a single Gateway connector"""
-
     name: str
     type: str = "gateway"  # "gateway" or "midpoint"
     status: str  # "connected", "disconnected", "error"
@@ -32,7 +30,6 @@ class ConnectorStatus(BaseModel):
 
 class MidPointConnector(BaseModel):
     """MidPoint connector (resource) information"""
-
     oid: str
     name: str
     type: str = "midpoint"
@@ -45,7 +42,6 @@ class MidPointConnector(BaseModel):
 
 class AllConnectorsResponse(BaseModel):
     """Response containing all connectors"""
-
     gateway_connectors: list[ConnectorStatus]
     midpoint_connectors: list[MidPointConnector]
     midpoint_available: bool
@@ -53,7 +49,6 @@ class AllConnectorsResponse(BaseModel):
 
 class ConnectorConfigUpdate(BaseModel):
     """Request to update connector configuration"""
-
     host: str | None = None
     port: int | None = None
     user: str | None = None
@@ -64,7 +59,6 @@ class ConnectorConfigUpdate(BaseModel):
 
 class ConnectorTestResponse(BaseModel):
     """Response for connector test"""
-
     name: str
     type: str  # "gateway" or "midpoint"
     success: bool
@@ -76,9 +70,11 @@ class ConnectorTestResponse(BaseModel):
 # Helper Functions
 # ============================================================================
 
-
 def get_gateway_connector_config(service: TargetService) -> dict[str, Any]:
-    """Get current configuration for a Gateway connector (without sensitive data)"""
+    """Get current configuration for a Gateway connector (without sensitive data).
+
+    Passwords are intentionally excluded — they are read from settings but never returned.
+    """
     if service == TargetService.MYSQL:
         return {
             "host": settings.MYSQL_HOST,
@@ -113,7 +109,6 @@ def get_gateway_connector_config(service: TargetService) -> dict[str, Any]:
 # Endpoints
 # ============================================================================
 
-
 @router.get("", response_model=AllConnectorsResponse)
 async def list_all_connectors():
     """List all connectors - both Gateway and MidPoint"""
@@ -121,7 +116,7 @@ async def list_all_connectors():
     midpoint_connectors = []
     midpoint_available = False
 
-    # Get Gateway connectors
+    # Get Gateway connectors — each one is connect()-checked then closed
     available_services = ConnectorFactory.get_available_services()
     for service in available_services:
         try:
@@ -135,6 +130,7 @@ async def list_all_connectors():
                 status_str = "error"
                 message = str(e)
             finally:
+                # Always disconnect even if health_check failed, to release the connection
                 try:
                     await connector.disconnect()
                 except Exception:
@@ -143,15 +139,13 @@ async def list_all_connectors():
             status_str = "error"
             message = f"Failed to create connector: {str(e)}"
 
-        gateway_connectors.append(
-            ConnectorStatus(
-                name=service.value,
-                type="gateway",
-                status=status_str,
-                message=message,
-                config=get_gateway_connector_config(service),
-            )
-        )
+        gateway_connectors.append(ConnectorStatus(
+            name=service.value,
+            type="gateway",
+            status=status_str,
+            message=message,
+            config=get_gateway_connector_config(service)
+        ))
 
     # Get MidPoint connectors
     try:
@@ -179,29 +173,27 @@ async def list_all_connectors():
                 else:
                     status_str = "unknown"
 
-                # Sanitize config
+                # Sanitize config: removes passwords and credentials before returning to the client
                 config = midpoint_client._sanitize_config(
                     res_obj.get("connectorConfiguration", {})
                 )
 
-                midpoint_connectors.append(
-                    MidPointConnector(
-                        oid=oid,
-                        name=name,
-                        type="midpoint",
-                        description=res_obj.get("description"),
-                        connector_type=connector_type,
-                        status=status_str,
-                        config=config,
-                    )
-                )
+                midpoint_connectors.append(MidPointConnector(
+                    oid=oid,
+                    name=name,
+                    type="midpoint",
+                    description=res_obj.get("description"),
+                    connector_type=connector_type,
+                    status=status_str,
+                    config=config
+                ))
     except Exception as e:
         logger.warning(f"Could not fetch MidPoint connectors: {e}")
 
     return AllConnectorsResponse(
         gateway_connectors=gateway_connectors,
         midpoint_connectors=midpoint_connectors,
-        midpoint_available=midpoint_available,
+        midpoint_available=midpoint_available
     )
 
 
@@ -231,15 +223,13 @@ async def list_gateway_connectors():
             status_str = "error"
             message = f"Failed to create connector: {str(e)}"
 
-        connectors.append(
-            ConnectorStatus(
-                name=service.value,
-                type="gateway",
-                status=status_str,
-                message=message,
-                config=get_gateway_connector_config(service),
-            )
-        )
+        connectors.append(ConnectorStatus(
+            name=service.value,
+            type="gateway",
+            status=status_str,
+            message=message,
+            config=get_gateway_connector_config(service)
+        ))
 
     return connectors
 
@@ -253,7 +243,7 @@ async def list_midpoint_connectors():
         if not await midpoint_client.health_check():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="MidPoint is not available",
+                detail="MidPoint is not available"
             )
 
         resources = await midpoint_client.get_resources()
@@ -280,17 +270,15 @@ async def list_midpoint_connectors():
                 res_obj.get("connectorConfiguration", {})
             )
 
-            connectors.append(
-                MidPointConnector(
-                    oid=oid,
-                    name=name,
-                    type="midpoint",
-                    description=res_obj.get("description"),
-                    connector_type=connector_type,
-                    status=status_str,
-                    config=config,
-                )
-            )
+            connectors.append(MidPointConnector(
+                oid=oid,
+                name=name,
+                type="midpoint",
+                description=res_obj.get("description"),
+                connector_type=connector_type,
+                status=status_str,
+                config=config
+            ))
 
     except HTTPException:
         raise
@@ -298,7 +286,7 @@ async def list_midpoint_connectors():
         logger.error(f"Error fetching MidPoint connectors: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch MidPoint connectors: {str(e)}",
+            detail=f"Failed to fetch MidPoint connectors: {str(e)}"
         )
 
     return connectors
@@ -312,13 +300,13 @@ async def get_gateway_connector(connector_name: str):
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Gateway connector '{connector_name}' not found",
+            detail=f"Gateway connector '{connector_name}' not found"
         )
 
     if not ConnectorFactory.is_service_available(service):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Gateway connector '{connector_name}' is not available",
+            detail=f"Gateway connector '{connector_name}' is not available"
         )
 
     try:
@@ -345,7 +333,7 @@ async def get_gateway_connector(connector_name: str):
         type="gateway",
         status=status_str,
         message=message,
-        config=get_gateway_connector_config(service),
+        config=get_gateway_connector_config(service)
     )
 
 
@@ -356,7 +344,7 @@ async def get_midpoint_connector(oid: str):
         if not await midpoint_client.health_check():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="MidPoint is not available",
+                detail="MidPoint is not available"
             )
 
         resource = await midpoint_client.get_resource(oid)
@@ -386,7 +374,7 @@ async def get_midpoint_connector(oid: str):
             description=res_obj.get("description"),
             connector_type=connector_type,
             status=status_str,
-            config=config,
+            config=config
         )
 
     except HTTPException:
@@ -395,7 +383,7 @@ async def get_midpoint_connector(oid: str):
         logger.error(f"Error fetching MidPoint connector {oid}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch MidPoint connector: {str(e)}",
+            detail=f"Failed to fetch MidPoint connector: {str(e)}"
         )
 
 
@@ -407,13 +395,13 @@ async def test_gateway_connector(connector_name: str):
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Gateway connector '{connector_name}' not found",
+            detail=f"Gateway connector '{connector_name}' not found"
         )
 
     if not ConnectorFactory.is_service_available(service):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Gateway connector '{connector_name}' is not available",
+            detail=f"Gateway connector '{connector_name}' is not available"
         )
 
     start_time = time.perf_counter()
@@ -431,7 +419,7 @@ async def test_gateway_connector(connector_name: str):
                     type="gateway",
                     success=True,
                     message="Connection successful",
-                    latency_ms=round(latency_ms, 2),
+                    latency_ms=round(latency_ms, 2)
                 )
             else:
                 return ConnectorTestResponse(
@@ -439,7 +427,7 @@ async def test_gateway_connector(connector_name: str):
                     type="gateway",
                     success=False,
                     message="Health check failed",
-                    latency_ms=round(latency_ms, 2),
+                    latency_ms=round(latency_ms, 2)
                 )
         finally:
             try:
@@ -453,7 +441,7 @@ async def test_gateway_connector(connector_name: str):
             type="gateway",
             success=False,
             message=f"Connection failed: {str(e)}",
-            latency_ms=round(latency_ms, 2),
+            latency_ms=round(latency_ms, 2)
         )
 
 
@@ -469,7 +457,7 @@ async def test_midpoint_connector(oid: str):
                 type="midpoint",
                 success=False,
                 message="MidPoint is not available",
-                latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                latency_ms=round((time.perf_counter() - start_time) * 1000, 2)
             )
 
         # Get resource name first
@@ -486,7 +474,7 @@ async def test_midpoint_connector(oid: str):
                 type="midpoint",
                 success=True,
                 message="Connection successful",
-                latency_ms=round(latency_ms, 2),
+                latency_ms=round(latency_ms, 2)
             )
         else:
             return ConnectorTestResponse(
@@ -494,7 +482,7 @@ async def test_midpoint_connector(oid: str):
                 type="midpoint",
                 success=False,
                 message=result.get("message", "Test failed"),
-                latency_ms=round(latency_ms, 2),
+                latency_ms=round(latency_ms, 2)
             )
 
     except Exception as e:
@@ -504,14 +492,12 @@ async def test_midpoint_connector(oid: str):
             type="midpoint",
             success=False,
             message=f"Test failed: {str(e)}",
-            latency_ms=round(latency_ms, 2),
+            latency_ms=round(latency_ms, 2)
         )
 
 
 @router.put("/gateway/{connector_name}", response_model=ConnectorStatus)
-async def update_gateway_connector_config(
-    connector_name: str, config: ConnectorConfigUpdate
-):
+async def update_gateway_connector_config(connector_name: str, config: ConnectorConfigUpdate):
     """Update Gateway connector configuration (runtime only)
 
     Note: Changes are in memory only and won't persist after restart.
@@ -522,13 +508,13 @@ async def update_gateway_connector_config(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Gateway connector '{connector_name}' not found",
+            detail=f"Gateway connector '{connector_name}' not found"
         )
 
     if not ConnectorFactory.is_service_available(service):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Gateway connector '{connector_name}' is not available",
+            detail=f"Gateway connector '{connector_name}' is not available"
         )
 
     # Update settings in memory
