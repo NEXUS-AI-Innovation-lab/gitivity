@@ -326,23 +326,25 @@ class OdooConnector(ProvisioningConnector):
                             existing_user_id = found_users[0]
                             logger.info(f"Found existing Odoo user by midpoint_uid {midpoint_uid} (id={existing_user_id})")
 
-                # Fallback: check by login (email)
+                # Fallback: check by login — only if midpoint_uid is absent (no UID = can't distinguish users)
+                # Never match archived users by login alone: an archived user ≠ a new user with the same email
                 if not existing_user_id:
                     existing = await self._execute(
-                        "res.users", "search", [["login", "=", login]], **_ctx,
+                        "res.users", "search", [["login", "=", login]],
+                        # active_test=True (default): only active users
                     )
                     if existing:
                         existing_user_id = existing[0]
-                        logger.info(f"Found existing Odoo user by login {login} (id={existing_user_id})")
+                        logger.info(f"Found existing active Odoo user by login {login} (id={existing_user_id})")
 
-                # Fallback: check by username as login
+                # Fallback: check by username as login (active users only)
                 if not existing_user_id and username != login:
                     existing = await self._execute(
-                        "res.users", "search", [["login", "=", username]], **_ctx,
+                        "res.users", "search", [["login", "=", username]],
                     )
                     if existing:
                         existing_user_id = existing[0]
-                        logger.info(f"Found existing Odoo user by username {username} (id={existing_user_id})")
+                        logger.info(f"Found existing active Odoo user by username {username} (id={existing_user_id})")
 
                 # If user already exists, UPDATE instead of creating a duplicate
                 if existing_user_id:
@@ -361,10 +363,16 @@ class OdooConnector(ProvisioningConnector):
                     logger.info(f"Updated existing Odoo user: {username} (id={user_id})")
 
                     if create_employee:
-                        employee_id = await self._create_employee(
-                            username=username, display_name=display_name,
-                            email=email, user_id=user_id, attrs=attrs,
+                        # Try to update existing employee first, create only if none exists
+                        employee_id = await self._update_employee(
+                            user_id=user_id, display_name=display_name,
+                            email=email, attrs=attrs,
                         )
+                        if employee_id is None:
+                            employee_id = await self._create_employee(
+                                username=username, display_name=display_name,
+                                email=email, user_id=user_id, attrs=attrs,
+                            )
 
                     return ProvisioningResult(
                         success=True,
@@ -516,18 +524,7 @@ class OdooConnector(ProvisioningConnector):
                 if user_ids:
                     search_method = f"email/login: {email}"
 
-            # Strategy 3: Search by display name (fullName)
-            if not user_ids and display_name:
-                user_ids = await self._execute(
-                    "res.users",
-                    "search",
-                    [["name", "=", display_name]],
-                    **_ctx,
-                )
-                if user_ids:
-                    search_method = f"name: {display_name}"
-
-            # Strategy 4: Search by username in login field
+            # Strategy 3: Search by username in login field
             if not user_ids and username:
                 user_ids = await self._execute(
                     "res.users",
@@ -613,7 +610,17 @@ class OdooConnector(ProvisioningConnector):
                 logger.info(f"Updating user groups to: {all_group_ids}")
 
             if update_vals:
-                await self._execute("res.users", "write", [user_id], update_vals)
+                # Extract name before writing to res.users (name is stored on res.partner)
+                name_to_update = update_vals.pop("name", None)
+                if update_vals:
+                    await self._execute("res.users", "write", [user_id], update_vals)
+                # Write name directly to the linked partner to ensure it's reflected in the UI
+                if name_to_update:
+                    user_data = await self._execute("res.users", "read", [user_id], ["partner_id"])
+                    if user_data and user_data[0].get("partner_id"):
+                        partner_id = user_data[0]["partner_id"][0]
+                        await self._execute("res.partner", "write", [partner_id], {"name": name_to_update})
+                        logger.info(f"Updated Odoo partner name: {name_to_update} (partner_id={partner_id})")
                 logger.info(f"Updated Odoo user: {username} (id={user_id})")
 
             # Also update linked employee if exists

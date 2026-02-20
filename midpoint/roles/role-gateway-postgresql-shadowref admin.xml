@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    Role pour groupe LDAP via REST Gateway (MidPoint 4.8+)
-    Utilise associationTargetSearch pour trouver le shadow par nom
+    Role pour profil PostgreSQL via REST Gateway (MidPoint 4.8+)
+    Utilise associationTargetSearch pour trouver le shadow par nom de profil
 -->
 <role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
       xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
@@ -10,10 +10,10 @@
       xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
       xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
-      oid="a1b2c3d4-3333-0000-0000-000300000002">
+      oid="a1b2c3d4-2222-0000-0000-000000000092">
 
-    <name>Gateway - Groupe LDAP Dev</name>
-    <description>Assigne le groupe LDAP "Admins" via la REST Gateway</description>
+    <name>Gateway - PostgreSQL Amin</name>
+    <description>Assigne le profil PostgreSQL "readonly" via la REST Gateway</description>
 
     <inducement>
         <construction>
@@ -25,13 +25,13 @@
                 <ref>ri:roles</ref>
                 <outbound>
                     <expression>
-                        <value>ldap</value>
+                        <value>postgresql</value>
                     </expression>
                 </outbound>
             </attribute>
-            <!-- Association vers le groupe LDAP "Admins" -->
+            <!-- Association vers le profil PostgreSQL "readonly" -->
             <association>
-                <ref>ri:ldapGroup</ref>
+                <ref>ri:postgresqlProfile</ref>
                 <outbound>
                     <strength>strong</strength>
                     <expression>
@@ -39,7 +39,7 @@
                             <filter>
                                 <q:equal>
                                     <q:path>attributes/icfs:name</q:path>
-                                    <q:value>Developers</q:value>
+                                    <q:value>admin</q:value>
                                 </q:equal>
                             </filter>
                             <searchStrategy>onResourceIfNeeded</searchStrategy>

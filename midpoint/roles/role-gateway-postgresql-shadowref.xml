@@ -10,7 +10,7 @@
       xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
       xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
-      oid="a1b2c3d4-2222-0000-0000-000000000032">
+      oid="a1b2c3d4-2222-0000-0000-000000000882">
 
     <name>Gateway - PostgreSQL ReadOnly (shadowRef)</name>
     <description>Assigne le profil PostgreSQL "readonly" via la REST Gateway</description>

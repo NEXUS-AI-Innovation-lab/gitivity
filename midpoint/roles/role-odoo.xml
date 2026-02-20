@@ -1,8 +1,8 @@
-<role oid="00000000-0000-0000-0000-000000000201"
+<role oid="00000000-0000-0000-0000-000000004201"
       xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
             xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3">
 
-    <name>odoo3</name>
+    <name>Gateway - odoo</name>
     <description>Accès Odoo ERP avec création d'employé</description>
     <inducement>
         <construction>

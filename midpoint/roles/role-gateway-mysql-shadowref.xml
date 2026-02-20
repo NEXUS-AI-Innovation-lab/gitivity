@@ -12,7 +12,7 @@
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
       oid="a1b2c3d4-1111-0000-0000-000000000002">
 
-    <name>Gateway - MySQL Readwrite (shadowRef)</name>
+    <name>Gateway - MySQL readonly</name>
     <description>Assigne le profil MySQL "readwrite" via la REST Gateway</description>
 
     <inducement>
@@ -39,7 +39,7 @@
                             <filter>
                                 <q:equal>
                                     <q:path>attributes/icfs:name</q:path>
-                                    <q:value>readwrite</q:value>
+                                    <q:value>readonly</q:value>
                                 </q:equal>
                             </filter>
                             <searchStrategy>onResourceIfNeeded</searchStrategy>
