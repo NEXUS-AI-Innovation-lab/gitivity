@@ -279,6 +279,150 @@ class ApprovalRedisRepository:
             logger.error(f"Failed to get user state: {e}")
             return None
 
+    # --- Approval group tracking (bulk email per user) ---
+
+    async def create_or_join_approval_group(
+        self, username: str, operation_type: str, operation_id: str, target_service: str
+    ) -> dict:
+        """Create a new approval group or join an existing one.
+
+        The first operation for a given (username, operation_type) becomes the
+        group leader and will send the single approval email for all services.
+        Subsequent operations for the same user join as members.
+
+        Args:
+            username: The username being provisioned
+            operation_type: Operation type (e.g. "CREATE_USER")
+            operation_id: This operation's ID
+            target_service: This operation's target service
+
+        Returns:
+            Dict with keys:
+              - group_leader (bool): True if this operation is the leader
+              - leader_operation_id (str): The leader's operation ID
+              - members (list): Current members including this one
+        """
+        key = f"approval:group:{username}:{operation_type}"
+        # Short TTL for the grouping window — long enough for all messages to arrive
+        group_ttl = 30  # seconds
+
+        try:
+            existing = await self.redis.get(key)
+            if existing:
+                # Join existing group as a member
+                group = json.loads(existing)
+                group["members"].append({"operation_id": operation_id, "target_service": target_service})
+                await self.redis.setex(key, group_ttl, json.dumps(group))
+                logger.info(
+                    f"Operation {operation_id} joined group for {username}/{operation_type} "
+                    f"(leader: {group['leader_operation_id']})"
+                )
+                return {
+                    "group_leader": False,
+                    "leader_operation_id": group["leader_operation_id"],
+                    "members": group["members"],
+                }
+            else:
+                # Create new group — this operation is the leader
+                group = {
+                    "leader_operation_id": operation_id,
+                    "username": username,
+                    "operation_type": operation_type,
+                    "members": [{"operation_id": operation_id, "target_service": target_service}],
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "finalized": False,
+                }
+                await self.redis.setex(key, group_ttl, json.dumps(group))
+                logger.info(f"Created approval group for {username}/{operation_type}, leader: {operation_id}")
+                return {
+                    "group_leader": True,
+                    "leader_operation_id": operation_id,
+                    "members": group["members"],
+                }
+        except Exception as e:
+            logger.error(f"Failed to create/join approval group: {e}")
+            # Fallback: behave as standalone leader (no grouping)
+            return {
+                "group_leader": True,
+                "leader_operation_id": operation_id,
+                "members": [{"operation_id": operation_id, "target_service": target_service}],
+            }
+
+    async def finalize_approval_group(self, username: str, operation_type: str) -> dict:
+        """Mark the group as finalized and return its members.
+
+        Called by the leader after the grouping window has elapsed.
+
+        Args:
+            username: The username
+            operation_type: Operation type
+
+        Returns:
+            The group dict with all members collected so far
+        """
+        key = f"approval:group:{username}:{operation_type}"
+        try:
+            existing = await self.redis.get(key)
+            if existing:
+                group = json.loads(existing)
+                group["finalized"] = True
+                # Extend TTL so the group is available when the callback arrives
+                await self.redis.setex(key, self.ttl, json.dumps(group))
+                logger.info(
+                    f"Finalized approval group for {username}/{operation_type}: "
+                    f"{len(group['members'])} member(s)"
+                )
+                return group
+            logger.warning(f"Approval group not found for finalization: {username}/{operation_type}")
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to finalize approval group: {e}")
+            return {}
+
+    async def get_group_by_leader(self, leader_operation_id: str) -> dict | None:
+        """Find an approval group by its leader operation ID.
+
+        Scans all group keys — only used during callback processing so
+        performance is acceptable (small number of active groups).
+
+        Args:
+            leader_operation_id: The leader's operation ID
+
+        Returns:
+            The group dict if found, None otherwise
+        """
+        try:
+            keys = await self.redis.keys("approval:group:*")
+            for key in keys:
+                value = await self.redis.get(key)
+                if value:
+                    group = json.loads(value)
+                    if group.get("leader_operation_id") == leader_operation_id:
+                        return group
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get group by leader {leader_operation_id}: {e}")
+            return None
+
+    async def remove_approval_group(self, username: str, operation_type: str) -> bool:
+        """Delete the approval group after all members have been processed.
+
+        Args:
+            username: The username
+            operation_type: Operation type
+
+        Returns:
+            True if deleted
+        """
+        try:
+            key = f"approval:group:{username}:{operation_type}"
+            result = await self.redis.delete(key)
+            logger.info(f"Removed approval group: {username}/{operation_type}")
+            return result > 0
+        except Exception as e:
+            logger.error(f"Failed to remove approval group: {e}")
+            return False
+
     async def clear_rejected_create(
         self, username: str, target_service: str
     ) -> bool:

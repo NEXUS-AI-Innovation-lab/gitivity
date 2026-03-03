@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     APPROVAL_ENABLED: bool = True  # Set to False to bypass approval (useful in dev/test)
     APPROVAL_WORKER_URL: str = "http://localhost:5101"
     APPROVAL_SLEEP_DURATION: int = 3600  # How long n8n waits for a decision before timeout
+    # Grouping window: how long (seconds) the leader waits for sibling operations to join
+    # before sending the single grouped approval email. Set to 0 to disable grouping.
+    APPROVAL_GROUP_WINDOW_SECONDS: int = 3
 
     # n8n Approval Workflow
     N8N_APPROVAL_WEBHOOK_URL: str = "http://localhost:5678/webhook/approval"

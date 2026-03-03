@@ -1,4 +1,5 @@
 """Main orchestrator for provisioning operations"""
+import asyncio
 import logging
 import traceback
 import uuid
@@ -213,7 +214,18 @@ class ProvisioningOrchestrator:
         operation_id: str,
         message: MidPointMessage,
     ) -> None:
-        """Request approval from Flask worker and store in Redis"""
+        """Request approval via n8n and store state in Redis.
+
+        Implements a short grouping window so that multiple services being
+        provisioned for the same user at the same time result in a single
+        approval email instead of one per service.
+
+        The first operation for a given (username, operation_type) becomes the
+        group leader.  It waits APPROVAL_GROUP_WINDOW_SECONDS for sibling
+        operations to register, then sends ONE n8n request covering all services.
+        Sibling operations simply store their data in Redis and return — they will
+        be processed when the leader's callback arrives.
+        """
         try:
             # Update status to APPROVAL_PENDING
             await self._update_status(
@@ -233,7 +245,6 @@ class ProvisioningOrchestrator:
 
             # Store the full MidPoint message in Redis so it can be reconstructed after the
             # callback arrives (which may be hours later, after the API process restarts).
-            # mode="json" ensures datetime objects are JSON-serializable.
             await approval_repo.add_pending_approval(
                 operation_id,
                 {
@@ -244,21 +255,66 @@ class ProvisioningOrchestrator:
                 },
             )
 
+            # --- Grouping logic ---
+            username = message.user_data.username
+            operation_type = message.operation_type.value
+
+            group_result = await approval_repo.create_or_join_approval_group(
+                username=username,
+                operation_type=operation_type,
+                operation_id=operation_id,
+                target_service=message.target_service.value,
+            )
+
+            if not group_result["group_leader"]:
+                # This operation is a group member — the leader will send the email.
+                logger.info(
+                    f"Operation {operation_id} ({message.target_service.value}) joined "
+                    f"approval group led by {group_result['leader_operation_id']} "
+                    f"for user '{username}'. Waiting for leader callback.",
+                    extra={"operation_id": operation_id},
+                )
+                return
+
+            # This operation is the group leader.
+            # Wait for sibling messages to arrive before sending the email.
+            window = settings.APPROVAL_GROUP_WINDOW_SECONDS
+            logger.info(
+                f"Operation {operation_id} is group leader for '{username}/{operation_type}'. "
+                f"Waiting {window}s for sibling operations to join.",
+                extra={"operation_id": operation_id},
+            )
+            await asyncio.sleep(window)
+
+            # Collect the final group membership
+            group = await approval_repo.finalize_approval_group(username, operation_type)
+            members = group.get("members", [{"operation_id": operation_id, "target_service": message.target_service.value}])
+
+            grouped_services = [m["target_service"] for m in members]
+            grouped_operation_ids = [m["operation_id"] for m in members]
+
+            logger.info(
+                f"Sending grouped approval for '{username}': services={grouped_services}",
+                extra={"operation_id": operation_id},
+            )
+
             # Generate approval request ID
             approval_request_id = str(uuid.uuid4())
 
-            # Send approval request to Flask worker
+            # Send ONE approval request to n8n covering all grouped services
             await self._send_approval_request(
                 operation_id=operation_id,
                 request_id=approval_request_id,
                 operation_data={
-                    "operation_type": message.operation_type.value,
+                    "operation_type": operation_type,
                     "target_service": message.target_service.value,
                     "user_data": message.user_data.model_dump(mode="json"),
+                    "grouped_services": grouped_services,
+                    "grouped_operation_ids": grouped_operation_ids,
                 },
             )
 
-            # Store request ID in database
+            # Store request ID in database for the leader
             await self._db.provisioningoperation.update(
                 where={"id": operation_id},
                 data={"approval_request_id": approval_request_id},
@@ -272,11 +328,12 @@ class ProvisioningOrchestrator:
             )
 
             logger.info(
-                f"Approval requested for operation {operation_id}. "
-                f"Worker will decide in {settings.APPROVAL_SLEEP_DURATION} seconds.",
+                f"Grouped approval requested for operation {operation_id} "
+                f"(leader, {len(members)} service(s)).",
                 extra={
                     "operation_id": operation_id,
                     "approval_request_id": approval_request_id,
+                    "grouped_services": grouped_services,
                 },
             )
 
@@ -561,6 +618,38 @@ class ProvisioningOrchestrator:
                         )
                     # Roll back the MidPoint role assignment so IAM stays in sync with reality
                     await self._remove_midpoint_role(operation)
+
+            # --- Propagate decision to group members (bulk approval) ---
+            # If this operation was the group leader, apply the same decision to all
+            # sibling operations that were grouped into the same approval email.
+            group = await approval_repo.get_group_by_leader(operation_id)
+            if group:
+                for member in group.get("members", []):
+                    member_id = member["operation_id"]
+                    if member_id == operation_id:
+                        continue  # already processed above
+                    try:
+                        logger.info(
+                            f"Propagating {'approval' if approved else 'rejection'} "
+                            f"to group member {member_id} ({member['target_service']})",
+                            extra={"operation_id": member_id, "leader_operation_id": operation_id},
+                        )
+                        await self.process_approval_response(
+                            operation_id=member_id,
+                            approved=approved,
+                            reason=reason,
+                            worker_id=worker_id,
+                        )
+                    except Exception as member_exc:
+                        logger.error(
+                            f"Failed to propagate approval to group member {member_id}: {member_exc}",
+                            extra={"operation_id": member_id},
+                        )
+                # Clean up the group entry from Redis
+                await approval_repo.remove_approval_group(
+                    group.get("username", ""),
+                    group.get("operation_type", ""),
+                )
 
         except Exception as e:
             logger.error(f"Failed to process approval response: {e}")
