@@ -467,9 +467,11 @@ class RabbitMQConsumer(BrokerConsumer):
                 # MySQL-specific: direct SQL grants (comma-separated) or role
                 "mysqlGrants": attributes.get("mysqlGrants"),
                 "mysqlRole": attributes.get("mysqlRole"),
+                "mysqlProfiles": attributes.get("mysqlProfiles"),
                 # PostgreSQL-specific: direct SQL grants (comma-separated) or role
                 "postgresqlGrants": attributes.get("postgresqlGrants"),
                 "postgresqlRole": attributes.get("postgresqlRole"),
+                "postgresqlProfiles": attributes.get("postgresqlProfiles"),
                 # Employee-specific attributes
                 "employeeNumber": attributes.get("employeeNumber"),
                 "personalNumber": attributes.get("personalNumber"),
@@ -514,6 +516,21 @@ class RabbitMQConsumer(BrokerConsumer):
             # Also check odooGroups - if present, include Odoo
             if odoo_groups and TargetService.ODOO not in target_services:
                 target_services.append(TargetService.ODOO)
+
+            # Fallback: check Redis user_state keys to find all provisioned services
+            if username:
+                try:
+                    from app.db.redis_client import RedisClient
+                    _redis = await RedisClient.get_client()
+                    for _svc_name in ["MYSQL", "POSTGRESQL", "LDAP", "ODOO"]:
+                        _svc = TargetService(_svc_name)
+                        if _svc not in target_services:
+                            _exists = await _redis.exists(f"user_state:{_svc_name}:{username}")
+                            if _exists:
+                                target_services.append(_svc)
+                                logger.info(f"DELETE: Found Redis state for {username}/{_svc_name} - adding to targets")
+                except Exception as _e:
+                    logger.warning(f"DELETE: Failed to check Redis services for {username}: {_e}")
 
             # If still no services (no cache, no roles, no groups), try ALL services
             if not target_services:

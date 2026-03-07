@@ -121,6 +121,10 @@ class PostgreSQLConnector(ProvisioningConnector):
 
         # Get postgresqlGrants from attributes (comma-separated privileges like "SELECT, INSERT, UPDATE")
         postgresql_grants = attrs.get("postgresqlGrants")
+        # Get postgresqlProfiles from attributes (multi-value, for shadowRef: e.g., ["admin"])
+        postgresql_profiles = attrs.get("postgresqlProfiles")
+        if isinstance(postgresql_profiles, str):
+            postgresql_profiles = [postgresql_profiles]
         # Get postgresqlRole from attributes (e.g., "readonly", "readwrite", "admin")
         postgresql_role = attrs.get("postgresqlRole")
 
@@ -186,7 +190,20 @@ class PostgreSQLConnector(ProvisioningConnector):
                             except Exception as e:
                                 logger.warning(f"Failed to grant {privilege}: {e}")
 
-                # Priority 2: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
+                # Priority 2: Use postgresqlProfiles (multi-value, shadowRef)
+                elif postgresql_profiles:
+                    pg_roles = self._roles_to_pg_roles(postgresql_profiles)
+                    logger.info(f"Using postgresqlProfiles (shadowRef) '{postgresql_profiles}': {pg_roles}")
+                    for pg_role in pg_roles:
+                        try:
+                            await conn.execute(
+                                f'GRANT "{pg_role}" TO "{escaped_username}"'
+                            )
+                            logger.debug(f"Granted {pg_role} to {username}")
+                        except asyncpg.UndefinedObjectError:
+                            logger.warning(f"PostgreSQL role {pg_role} does not exist")
+
+                # Priority 3: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
                 elif postgresql_role:
                     pg_roles = self._roles_to_pg_roles([postgresql_role])
                     logger.info(f"Using postgresqlRole attribute '{postgresql_role}': {pg_roles}")
@@ -199,7 +216,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                         except asyncpg.UndefinedObjectError:
                             logger.warning(f"PostgreSQL role {pg_role} does not exist")
 
-                # Priority 3: Grant predefined roles based on role mapping
+                # Priority 4: Grant predefined roles based on role mapping
                 elif roles:
                     pg_roles = self._roles_to_pg_roles(roles)
                     for pg_role in pg_roles:
@@ -278,17 +295,25 @@ class PostgreSQLConnector(ProvisioningConnector):
                 is_retriable=True,
             )
 
-        # Check if role exists - if not, create it first
+        # Check if role exists - if not, try rename from old_username or create
         if not await self._role_exists(username):
-            logger.info(f"PostgreSQL role {username} does not exist, creating first...")
-            # Create the role with basic settings, then continue with update
-            escaped_username = username.replace('"', '""')
-            escaped_password = password.replace("'", "''") if password else "changeme"
-            async with self._pool.acquire() as conn:
-                await conn.execute(
-                    f'CREATE ROLE "{escaped_username}" WITH LOGIN PASSWORD \'{escaped_password}\''
-                )
-            logger.info(f"Created PostgreSQL role: {username}")
+            old_username = (attributes or {}).get("old_username")
+            if old_username and await self._role_exists(old_username):
+                # Username changed: rename the existing role
+                escaped_old = old_username.replace('"', '""')
+                escaped_new = username.replace('"', '""')
+                async with self._pool.acquire() as conn:
+                    await conn.execute(f'ALTER ROLE "{escaped_old}" RENAME TO "{escaped_new}"')
+                logger.info(f"Renamed PostgreSQL role: {old_username} → {username}")
+            else:
+                logger.info(f"PostgreSQL role {username} does not exist, creating first...")
+                escaped_username = username.replace('"', '""')
+                escaped_password = password.replace("'", "''") if password else "changeme"
+                async with self._pool.acquire() as conn:
+                    await conn.execute(
+                        f'CREATE ROLE "{escaped_username}" WITH LOGIN PASSWORD \'{escaped_password}\''
+                    )
+                logger.info(f"Created PostgreSQL role: {username}")
 
         escaped_username = username.replace('"', '""')
 
@@ -312,13 +337,16 @@ class PostgreSQLConnector(ProvisioningConnector):
                         await conn.execute(f'ALTER ROLE "{escaped_username}" NOLOGIN')
                         logger.info(f"Disabled login for PostgreSQL role: {username}")
 
-                # Get postgresqlGrants and postgresqlRole from attributes
+                # Get postgresqlGrants, postgresqlProfiles and postgresqlRole from attributes
                 attrs = attributes or {}
                 postgresql_grants = attrs.get("postgresqlGrants")
+                postgresql_profiles = attrs.get("postgresqlProfiles")
+                if isinstance(postgresql_profiles, str):
+                    postgresql_profiles = [postgresql_profiles]
                 postgresql_role = attrs.get("postgresqlRole")
 
-                # Update privileges if postgresqlGrants, postgresqlRole, or roles provided
-                if postgresql_grants is not None or postgresql_role is not None or roles is not None:
+                # Update privileges if postgresqlGrants, postgresqlProfiles, postgresqlRole, or roles provided
+                if postgresql_grants is not None or postgresql_profiles is not None or postgresql_role is not None or roles is not None:
                     # Revoke all current role memberships before re-granting to avoid stale privileges
                     current_roles = await conn.fetch(
                         """
@@ -378,7 +406,20 @@ class PostgreSQLConnector(ProvisioningConnector):
                                 except Exception as e:
                                     logger.warning(f"Failed to grant {privilege}: {e}")
 
-                    # Priority 2: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
+                    # Priority 2: Use postgresqlProfiles (multi-value, shadowRef)
+                    elif postgresql_profiles:
+                        pg_roles = self._roles_to_pg_roles(postgresql_profiles)
+                        logger.info(f"Updating with postgresqlProfiles (shadowRef) '{postgresql_profiles}': {pg_roles}")
+                        for pg_role in pg_roles:
+                            try:
+                                await conn.execute(
+                                    f'GRANT "{pg_role}" TO "{escaped_username}"'
+                                )
+                                logger.debug(f"Granted {pg_role} to {username}")
+                            except asyncpg.UndefinedObjectError:
+                                logger.warning(f"PostgreSQL role {pg_role} does not exist")
+
+                    # Priority 3: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
                     elif postgresql_role:
                         pg_roles = self._roles_to_pg_roles([postgresql_role])
                         logger.info(f"Updating with postgresqlRole '{postgresql_role}': {pg_roles}")
@@ -391,7 +432,7 @@ class PostgreSQLConnector(ProvisioningConnector):
                             except asyncpg.UndefinedObjectError:
                                 logger.warning(f"PostgreSQL role {pg_role} does not exist")
 
-                    # Priority 3: Grant predefined roles based on role mapping
+                    # Priority 4: Grant predefined roles based on role mapping
                     elif roles is not None:
                         pg_roles = self._roles_to_pg_roles(roles)
                         for pg_role in pg_roles:
@@ -463,20 +504,27 @@ class PostgreSQLConnector(ProvisioningConnector):
                 is_retriable=True,
             )
 
-        escaped_username = username.replace('"', '""')
+        # If username not found, try old_username (in case of rename before delete)
+        old_username = (attributes or {}).get("old_username")
+        effective_username = username
+        if old_username and not await self._role_exists(username) and await self._role_exists(old_username):
+            logger.info(f"PostgreSQL delete: using old username {old_username} (current {username} not found)")
+            effective_username = old_username
+
+        escaped_username = effective_username.replace('"', '""')
 
         try:
             async with self._pool.acquire() as conn:
                 # Check if role exists
                 exists = await conn.fetchval(
-                    "SELECT 1 FROM pg_roles WHERE rolname = $1", username
+                    "SELECT 1 FROM pg_roles WHERE rolname = $1", effective_username
                 )
 
                 if not exists:
                     return ProvisioningResult(
                         success=True,
-                        message=f"Role {username} does not exist (already deleted)",
-                        details={"username": username, "already_deleted": True},
+                        message=f"Role {effective_username} does not exist (already deleted)",
+                        details={"username": effective_username, "already_deleted": True},
                     )
 
                 # Step 1: Revoke all role memberships granted TO this user

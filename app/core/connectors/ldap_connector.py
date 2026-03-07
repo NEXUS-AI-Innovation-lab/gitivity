@@ -181,9 +181,9 @@ class LDAPConnector(ProvisioningConnector):
         employee_number = attrs.get("personalNumber", "") or midpoint_uid
 
         # Build user attributes
-        first_name = attrs.get("firstName", username)
-        last_name = attrs.get("lastName", "")
-        full_name = attrs.get("fullName", f"{first_name} {last_name}".strip())
+        first_name = attrs.get("firstName") or username
+        last_name = attrs.get("lastName") or ""
+        full_name = attrs.get("fullName") or f"{first_name} {last_name}".strip() or username
 
         # Determine base DN from first group or use settings
         if ldap_groups:
@@ -382,9 +382,9 @@ class LDAPConnector(ProvisioningConnector):
         midpoint_uid = attrs.get("midpoint_uid", "")
         employee_number = attrs.get("personalNumber", "") or midpoint_uid
 
-        first_name = attrs.get("firstName", "")
-        last_name = attrs.get("lastName", "")
-        full_name = attrs.get("fullName", f"{first_name} {last_name}".strip())
+        first_name = attrs.get("firstName") or ""
+        last_name = attrs.get("lastName") or ""
+        full_name = attrs.get("fullName") or f"{first_name} {last_name}".strip()
 
         # Determine base DN
         if ldap_groups:
@@ -642,9 +642,22 @@ class LDAPConnector(ProvisioningConnector):
                     logger.warning(f"Error removing user from {group_dn}: {e}")
 
             # Then delete the user entry
+            if username:
+                _delete_filter = f"(uid={username})"
+            else:
+                midpoint_uid = attrs.get("midpoint_uid", "")
+                if midpoint_uid:
+                    _delete_filter = f"(employeeNumber={midpoint_uid})"
+                else:
+                    logger.warning("Cannot identify LDAP user for deletion: no uid or midpoint_uid")
+                    return ProvisioningResult(
+                        success=True,
+                        message="No identifier for LDAP deletion",
+                        details={"skipped": True},
+                    )
             self._connection.search(
                 search_base=f"ou=Users,{base_dn}",
-                search_filter=f"(uid={username})",
+                search_filter=_delete_filter,
                 search_scope=SUBTREE,
             )
 

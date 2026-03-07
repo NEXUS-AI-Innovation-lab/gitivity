@@ -21,6 +21,8 @@ ROLE_TO_PRIVILEGES: dict[str, list[str]] = {
     "readonly": ["SELECT"],
     "readwrite": ["SELECT", "INSERT", "UPDATE", "DELETE"],
     "dba": ["ALL PRIVILEGES WITH GRANT OPTION"],
+    # Fallback: service role name from MidPoint (shadowRef takes priority via mysqlProfiles)
+    "mysql": ["SELECT", "INSERT", "UPDATE", "DELETE"],
 }
 
 
@@ -124,6 +126,11 @@ class MySQLConnector(ProvisioningConnector):
         # Get mysqlGrants from attributes (comma-separated privileges like "SELECT, INSERT, UPDATE")
         mysql_grants = attributes.get("mysqlGrants") if attributes else None
 
+        # Get mysqlProfiles from attributes (multi-value, for shadowRef: e.g., ["admin"])
+        mysql_profiles = attributes.get("mysqlProfiles") if attributes else None
+        if isinstance(mysql_profiles, str):
+            mysql_profiles = [mysql_profiles]
+
         # Get mysqlRole from attributes (e.g., "readonly", "readwrite", "admin")
         mysql_role = attributes.get("mysqlRole") if attributes else None
 
@@ -146,28 +153,41 @@ class MySQLConnector(ProvisioningConnector):
                     await cursor.execute(create_sql, (username, host, password))
                     logger.info(f"Created MySQL user: {username}@{host}")
 
+                    # MySQL 8.0: GRANT/REVOKE DDL does not support parameterized user@host
+                    # Use direct string interpolation with manual escaping
+                    esc_user = username.replace("'", "''")
+                    esc_host = host.replace("'", "''")
+
                     # Priority 1: Use mysqlGrants if provided (direct privileges)
                     if mysql_grants:
                         privileges = self._parse_grants(mysql_grants)
                         logger.info(f"Using mysqlGrants attribute: {privileges}")
                         for privilege in privileges:
-                            grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
-                            await cursor.execute(grant_sql, (username, host))
+                            grant_sql = f"GRANT {privilege} ON {database}.* TO '{esc_user}'@'{esc_host}'"
+                            await cursor.execute(grant_sql)
                             logger.debug(f"Granted {privilege} to {username}@{host}")
-                    # Priority 2: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
+                    # Priority 2: Use mysqlProfiles (multi-value, shadowRef)
+                    elif mysql_profiles:
+                        privileges = self._roles_to_privileges(mysql_profiles)
+                        logger.info(f"Using mysqlProfiles (shadowRef) '{mysql_profiles}': {privileges}")
+                        for privilege in privileges:
+                            grant_sql = f"GRANT {privilege} ON {database}.* TO '{esc_user}'@'{esc_host}'"
+                            await cursor.execute(grant_sql)
+                            logger.debug(f"Granted {privilege} to {username}@{host}")
+                    # Priority 3: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
                     elif mysql_role:
                         privileges = self._roles_to_privileges([mysql_role])
                         logger.info(f"Using mysqlRole attribute '{mysql_role}': {privileges}")
                         for privilege in privileges:
-                            grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
-                            await cursor.execute(grant_sql, (username, host))
+                            grant_sql = f"GRANT {privilege} ON {database}.* TO '{esc_user}'@'{esc_host}'"
+                            await cursor.execute(grant_sql)
                             logger.debug(f"Granted {privilege} to {username}@{host}")
-                    # Priority 3: Use role-based privileges from roles array
+                    # Priority 4: Use role-based privileges from roles array
                     elif roles:
                         privileges = self._roles_to_privileges(roles)
                         for privilege in privileges:
-                            grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
-                            await cursor.execute(grant_sql, (username, host))
+                            grant_sql = f"GRANT {privilege} ON {database}.* TO '{esc_user}'@'{esc_host}'"
+                            await cursor.execute(grant_sql)
                             logger.debug(f"Granted {privilege} to {username}@{host}")
 
                     await cursor.execute("FLUSH PRIVILEGES")
@@ -223,18 +243,31 @@ class MySQLConnector(ProvisioningConnector):
         host = attributes.get("host", "%") if attributes else "%"
         database = attributes.get("database", "*") if attributes else "*"
 
-        # Check if user exists - if not, create it first
+        # Check if user exists - if not, try rename from old_username or create
         if not await self._user_exists(username, host):
-            logger.info(f"MySQL user {username}@{host} does not exist, creating first...")
-            async with self._pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    create_password = password if password else "changeme"
-                    await cursor.execute(
-                        "CREATE USER %s@%s IDENTIFIED BY %s",
-                        (username, host, create_password)
-                    )
-                    await cursor.execute("FLUSH PRIVILEGES")
-            logger.info(f"Created MySQL user: {username}@{host}")
+            old_username = (attributes or {}).get("old_username")
+            if old_username and await self._user_exists(old_username, host):
+                # Username changed: rename the existing user
+                async with self._pool.acquire() as conn:
+                    async with conn.cursor() as cursor:
+                        esc_old = old_username.replace("'", "''")
+                        esc_new = username.replace("'", "''")
+                        await cursor.execute(
+                            f"RENAME USER '{esc_old}'@'{host}' TO '{esc_new}'@'{host}'"
+                        )
+                        await cursor.execute("FLUSH PRIVILEGES")
+                logger.info(f"Renamed MySQL user: {old_username} → {username}@{host}")
+            else:
+                logger.info(f"MySQL user {username}@{host} does not exist, creating first...")
+                async with self._pool.acquire() as conn:
+                    async with conn.cursor() as cursor:
+                        create_password = password if password else "changeme"
+                        await cursor.execute(
+                            "CREATE USER %s@%s IDENTIFIED BY %s",
+                            (username, host, create_password)
+                        )
+                        await cursor.execute("FLUSH PRIVILEGES")
+                logger.info(f"Created MySQL user: {username}@{host}")
 
         try:
             async with self._pool.acquire() as conn:
@@ -259,16 +292,23 @@ class MySQLConnector(ProvisioningConnector):
                             )
                             logger.info(f"Locked MySQL user: {username}@{host}")
 
-                    # Get mysqlGrants and mysqlRole from attributes
+                    # Get mysqlGrants, mysqlProfiles and mysqlRole from attributes
                     mysql_grants = attributes.get("mysqlGrants") if attributes else None
+                    mysql_profiles = attributes.get("mysqlProfiles") if attributes else None
+                    if isinstance(mysql_profiles, str):
+                        mysql_profiles = [mysql_profiles]
                     mysql_role = attributes.get("mysqlRole") if attributes else None
 
-                    # Update privileges if mysqlGrants, mysqlRole, or roles provided
-                    if mysql_grants is not None or mysql_role is not None or roles is not None:
+                    # Update privileges if mysqlGrants, mysqlProfiles, mysqlRole, or roles provided
+                    if mysql_grants is not None or mysql_profiles is not None or mysql_role is not None or roles is not None:
+                        # MySQL 8.0: GRANT/REVOKE DDL does not support parameterized user@host
+                        esc_user = username.replace("'", "''")
+                        esc_host = host.replace("'", "''")
+
                         # Revoke all existing privileges first to avoid accumulating stale grants
-                        revoke_sql = "REVOKE ALL PRIVILEGES ON *.* FROM %s@%s"
+                        revoke_sql = f"REVOKE ALL PRIVILEGES ON *.* FROM '{esc_user}'@'{esc_host}'"
                         try:
-                            await cursor.execute(revoke_sql, (username, host))
+                            await cursor.execute(revoke_sql)
                         except aiomysql.Error:
                             pass  # User might not have any privileges yet
 
@@ -276,19 +316,23 @@ class MySQLConnector(ProvisioningConnector):
                         if mysql_grants:
                             privileges = self._parse_grants(mysql_grants)
                             logger.info(f"Updating with mysqlGrants: {privileges}")
-                        # Priority 2: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
+                        # Priority 2: Use mysqlProfiles (multi-value, shadowRef)
+                        elif mysql_profiles:
+                            privileges = self._roles_to_privileges(mysql_profiles)
+                            logger.info(f"Updating with mysqlProfiles (shadowRef) '{mysql_profiles}': {privileges}")
+                        # Priority 3: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
                         elif mysql_role:
                             privileges = self._roles_to_privileges([mysql_role])
                             logger.info(f"Updating with mysqlRole '{mysql_role}': {privileges}")
-                        # Priority 3: Use role-based privileges from roles array
+                        # Priority 4: Use role-based privileges from roles array
                         elif roles is not None:
                             privileges = self._roles_to_privileges(roles)
                         else:
                             privileges = []
 
                         for privilege in privileges:
-                            grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
-                            await cursor.execute(grant_sql, (username, host))
+                            grant_sql = f"GRANT {privilege} ON {database}.* TO '{esc_user}'@'{esc_host}'"
+                            await cursor.execute(grant_sql)
 
                     await cursor.execute("FLUSH PRIVILEGES")
 
@@ -328,27 +372,41 @@ class MySQLConnector(ProvisioningConnector):
                 is_retriable=True,
             )
 
+        # If username not found, try old_username (in case of rename before delete)
+        effective_username = username
+        old_username = (attributes or {}).get("old_username")
+
         try:
             async with self._pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     # Find all hosts for this user
                     await cursor.execute(
-                        "SELECT Host FROM mysql.user WHERE User = %s", (username,)
+                        "SELECT Host FROM mysql.user WHERE User = %s", (effective_username,)
                     )
                     hosts = await cursor.fetchall()
+
+                    # Fallback to old_username if not found
+                    if not hosts and old_username:
+                        await cursor.execute(
+                            "SELECT Host FROM mysql.user WHERE User = %s", (old_username,)
+                        )
+                        hosts = await cursor.fetchall()
+                        if hosts:
+                            logger.info(f"MySQL delete: using old username {old_username} (current {username} not found)")
+                            effective_username = old_username
 
                     if not hosts:
                         return ProvisioningResult(
                             success=True,
-                            message=f"User {username} does not exist (already deleted)",
-                            details={"username": username, "already_deleted": True},
+                            message=f"User {effective_username} does not exist (already deleted)",
+                            details={"username": effective_username, "already_deleted": True},
                         )
 
                     # Drop user for each host
                     for (host,) in hosts:
                         drop_sql = "DROP USER %s@%s"
-                        await cursor.execute(drop_sql, (username, host))
-                        logger.info(f"Deleted MySQL user: {username}@{host}")
+                        await cursor.execute(drop_sql, (effective_username, host))
+                        logger.info(f"Deleted MySQL user: {effective_username}@{host}")
 
                     await cursor.execute("FLUSH PRIVILEGES")
 

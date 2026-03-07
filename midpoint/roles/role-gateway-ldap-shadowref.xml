@@ -10,15 +10,15 @@
       xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
       xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
-      oid="a1b2c3d4-3333-0000-0000-000300000002">
+      oid="a1b2c3d4-3333-0000-0000-000300000044">
 
-    <name>Gateway - Groupe LDAP Dev</name>
+    <name>Gateway - Groupe LDAP Admin</name>
     <description>Assigne le groupe LDAP "Admins" via la REST Gateway</description>
 
     <inducement>
         <construction>
             <!-- Ressource REST Gateway RabbitMQ -->
-            <resourceRef oid="3447776b-105c-4663-a025-5b27568ee091" type="c:ResourceType"/>
+            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="c:ResourceType"/>
             <kind>account</kind>
             <intent>default</intent>
             <attribute>
@@ -29,7 +29,7 @@
                     </expression>
                 </outbound>
             </attribute>
-            <!-- Association vers le groupe LDAP "Admins" -->
+            <!-- Association vers le groupe LDAP "Admins" via shadowRef -->
             <association>
                 <ref>ri:ldapGroup</ref>
                 <outbound>
@@ -39,7 +39,7 @@
                             <filter>
                                 <q:equal>
                                     <q:path>attributes/icfs:name</q:path>
-                                    <q:value>Developers</q:value>
+                                    <q:value>Admins</q:value>
                                 </q:equal>
                             </filter>
                             <searchStrategy>onResourceIfNeeded</searchStrategy>

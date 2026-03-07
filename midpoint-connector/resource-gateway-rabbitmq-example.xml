@@ -1,18 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
           xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
           xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
           xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-          oid="YOUR-RESOURCE-OID">
+          oid="736ea741-2c73-4478-b5d1-07d84cdf860f">
 
     <name>Gateway RabbitMQ Resource</name>
 
-    <connectorRef type="ConnectorType">
-        <filter>
-            <q:text>connectorType = "lu.lns.connector.restgateway.RestGatewayConnector"</q:text>
-        </filter>
-    </connectorRef>
+    <connectorRef oid="0744a4d8-918e-471d-855d-83497e59c9c6" type="ConnectorType"/>
 
     <!-- ========================================= -->
     <!-- CONFIGURATION RABBITMQ - ICI ! -->
@@ -24,14 +21,14 @@
             <gen:useRabbitmq>true</gen:useRabbitmq>
 
             <!-- Configuration RabbitMQ -->
-            <gen:rabbitmqHost>172.17.0.1</gen:rabbitmqHost>
+            <gen:rabbitmqHost>rabbitmq</gen:rabbitmqHost>
             <gen:rabbitmqPort>5672</gen:rabbitmqPort>
-            <gen:rabbitmqUsername>admin</gen:rabbitmqUsername>
-            <gen:rabbitmqPassword>admin123</gen:rabbitmqPassword>
-            <gen:rabbitmqQueue>midpoint-operations</gen:rabbitmqQueue>
+            <gen:rabbitmqUsername>guest</gen:rabbitmqUsername>
+            <gen:rabbitmqPassword>guest</gen:rabbitmqPassword>
+            <gen:rabbitmqQueue>gateway-iam-provisioning</gen:rabbitmqQueue>
 
             <!-- Anciennes propriétés HTTP (ignorées quand useRabbitmq=true) -->
-            <gen:gatewayUrl>http://localhost:5100</gen:gatewayUrl>
+            <gen:gatewayUrl>http://gateway-http:5100</gen:gatewayUrl>
             <gen:connectionTimeout>30000</gen:connectionTimeout>
             <gen:requestTimeout>60000</gen:requestTimeout>
             <gen:validateSsl>true</gen:validateSsl>
@@ -43,7 +40,7 @@
     <capabilities xmlns:cap="http://midpoint.evolveum.com/xml/ns/public/resource/capabilities-3">
         <configured>
             <cap:read>
-                <cap:enabled>false</cap:enabled>
+                <cap:enabled>true</cap:enabled>
             </cap:read>
             <cap:create>
                 <cap:enabled>true</cap:enabled>
@@ -119,12 +116,42 @@
                         <script>
                             <code>
                                 import com.evolveum.midpoint.xml.ns._public.common.common_3.ActivationStatusType
-                                activation?.administrativeStatus == ActivationStatusType.ENABLED
+                                focus?.activation?.administrativeStatus == ActivationStatusType.ENABLED
                             </code>
                         </script>
                     </expression>
                 </outbound>
             </attribute>
+
+            <association>
+                <ref>ri:ldapGroup</ref>
+                <displayName>LDAP Group Membership</displayName>
+                <kind>entitlement</kind>
+                <intent>ldap-group</intent>
+                <direction>subjectToObject</direction>
+                <associationAttribute>ri:ldapGroups</associationAttribute>
+                <valueAttribute>icfs:uid</valueAttribute>
+            </association>
+
+            <association>
+                <ref>ri:postgresqlProfile</ref>
+                <displayName>PostgreSQL Profile</displayName>
+                <kind>entitlement</kind>
+                <intent>postgresql-profile</intent>
+                <direction>subjectToObject</direction>
+                <associationAttribute>ri:postgresqlProfiles</associationAttribute>
+                <valueAttribute>icfs:uid</valueAttribute>
+            </association>
+
+            <association>
+                <ref>ri:mysqlProfile</ref>
+                <displayName>MySQL Profile</displayName>
+                <kind>entitlement</kind>
+                <intent>mysql-profile</intent>
+                <direction>subjectToObject</direction>
+                <associationAttribute>ri:mysqlProfiles</associationAttribute>
+                <valueAttribute>icfs:uid</valueAttribute>
+            </association>
 
             <activation>
                 <administrativeStatus>
@@ -134,6 +161,46 @@
                 </administrativeStatus>
             </activation>
         </objectType>
+
+        <!-- Entitlement: LDAP Groups -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>ldap-group</intent>
+            <displayName>LDAP Group</displayName>
+            <default>true</default>
+            <objectClass>ri:CustomLdapGroupObjectClass</objectClass>
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>Group DN</displayName>
+            </attribute>
+        </objectType>
+
+        <!-- Entitlement: PostgreSQL Profiles -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>postgresql-profile</intent>
+            <displayName>PostgreSQL Profile</displayName>
+            <default>false</default>
+            <objectClass>ri:CustomPostgresqlProfileObjectClass</objectClass>
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>Profile Name</displayName>
+            </attribute>
+        </objectType>
+
+        <!-- Entitlement: MySQL Profiles -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>mysql-profile</intent>
+            <displayName>MySQL Profile</displayName>
+            <default>false</default>
+            <objectClass>ri:CustomMysqlProfileObjectClass</objectClass>
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>Profile Name</displayName>
+            </attribute>
+        </objectType>
+
     </schemaHandling>
 
     <!-- Synchronization -->

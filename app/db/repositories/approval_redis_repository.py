@@ -247,15 +247,30 @@ class ApprovalRedisRepository:
             True if stored successfully
         """
         try:
+            ttl = 90 * 24 * 3600  # 90 days
             key = f"user_state:{target_service}:{username}"
             value = json.dumps(user_data)
-            ttl = 90 * 24 * 3600  # 90 days
-            result = await self.redis.setex(key, ttl, value)
+            await self.redis.setex(key, ttl, value)
+            # Store secondary index: UID → username for rename tracking
+            midpoint_uid = (user_data.get("attributes") or {}).get("midpoint_uid") or user_data.get("midpoint_uid")
+            if midpoint_uid:
+                uid_key = f"user_uid:{target_service}:{midpoint_uid}"
+                await self.redis.setex(uid_key, ttl, username)
             logger.debug(f"Stored user state: {username} on {target_service}")
-            return bool(result)
+            return True
         except Exception as e:
             logger.error(f"Failed to store user state: {e}")
             return False
+
+    async def get_username_by_uid(self, midpoint_uid: str, target_service: str) -> str | None:
+        """Get the stored username for a given MidPoint UID and service (for rename detection)"""
+        try:
+            uid_key = f"user_uid:{target_service}:{midpoint_uid}"
+            value = await self.redis.get(uid_key)
+            return value.decode() if isinstance(value, bytes) else value
+        except Exception as e:
+            logger.error(f"Failed to get username by uid: {e}")
+            return None
 
     async def get_user_state(
         self, username: str, target_service: str

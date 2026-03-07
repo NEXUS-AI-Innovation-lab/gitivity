@@ -8,7 +8,7 @@
 
     <name>gateway-iam</name>
 
-    <connectorRef oid="84505b3d-5f90-4617-a160-6548be000a44" type="c:ConnectorType">
+    <connectorRef oid="0744a4d8-918e-471d-855d-83497e59c9c6" type="c:ConnectorType">
         <!-- ConnId lu.lns.connector.restgateway.RestGatewayConnector v1.2.0-SNAPSHOT -->
     </connectorRef>
 
@@ -329,6 +329,22 @@
                 <associationAttribute>ri:mysqlGrants</associationAttribute>
                 <valueAttribute>icfs:uid</valueAttribute>
             </association>
+
+            <attribute>
+                <ref>ri:odooCreateUser</ref>
+                <outbound>
+                    <strength>weak</strength>
+                    <expression><value>false</value></expression>
+                </outbound>
+            </attribute>
+
+            <attribute>
+                <ref>ri:odooCreateEmployee</ref>
+                <outbound>
+                    <strength>weak</strength>
+                    <expression><value>false</value></expression>
+                </outbound>
+            </attribute>
 
             <activation>
                 <administrativeStatus>

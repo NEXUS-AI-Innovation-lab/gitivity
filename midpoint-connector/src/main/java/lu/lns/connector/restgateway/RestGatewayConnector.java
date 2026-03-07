@@ -146,6 +146,16 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
         ldapGroupsBuilder.setMultiValued(true);
         userClassBuilder.addAttributeInfo(ldapGroupsBuilder.build());
 
+        // Profils PostgreSQL (multi-valué, pour shadowRef dans MidPoint)
+        AttributeInfoBuilder pgProfilesBuilder = new AttributeInfoBuilder("postgresqlProfiles", String.class);
+        pgProfilesBuilder.setMultiValued(true);
+        userClassBuilder.addAttributeInfo(pgProfilesBuilder.build());
+
+        // Profils MySQL (multi-valué, pour shadowRef dans MidPoint)
+        AttributeInfoBuilder mysqlProfilesBuilder = new AttributeInfoBuilder("mysqlProfiles", String.class);
+        mysqlProfilesBuilder.setMultiValued(true);
+        userClassBuilder.addAttributeInfo(mysqlProfilesBuilder.build());
+
         // MySQL grants (comma-separated privileges like "SELECT, INSERT, UPDATE")
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("mysqlGrants", String.class));
 

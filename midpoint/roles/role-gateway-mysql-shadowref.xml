@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
     Role pour profil MySQL via REST Gateway (MidPoint 4.8+)
-    Utilise associationTargetSearch pour trouver le shadow par nom de profil
+    Utilise associationTargetSearch (shadowRef) via l'attribut multi-valeur ri:mysqlProfiles
 -->
 <role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
       xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
@@ -10,15 +10,15 @@
       xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
       xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
       xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
-      oid="a1b2c3d4-1111-0000-0000-000000000002">
+      oid="a1b2c3d4-1111-0000-0000-000077000002">
 
-    <name>Gateway - MySQL readonly</name>
-    <description>Assigne le profil MySQL "readwrite" via la REST Gateway</description>
+    <name>Gateway - MySQL readonly (shadowRef)</name>
+    <description>Assigne le profil MySQL "admin" via la REST Gateway (shadowRef)</description>
 
     <inducement>
         <construction>
             <!-- Ressource REST Gateway RabbitMQ -->
-            <resourceRef oid="3447776b-105c-4663-a025-5b27568ee091" type="c:ResourceType"/>
+            <resourceRef oid="736ea741-2c73-4478-b5d1-07d84cdf860f" type="c:ResourceType"/>
             <kind>account</kind>
             <intent>default</intent>
             <attribute>
@@ -29,7 +29,7 @@
                     </expression>
                 </outbound>
             </attribute>
-            <!-- Association vers le profil MySQL "readwrite" -->
+            <!-- Association shadowRef vers le profil MySQL "admin" -->
             <association>
                 <ref>ri:mysqlProfile</ref>
                 <outbound>

@@ -6,3 +6,45 @@ pymysql==1.1.0
 psycopg2-binary==2.9.9
 cryptography>=41.0.0
 pika>=1.3.0
+
+
+Ici c'est pour savoir quelle groupes ldap sont dans le payload :
+
+ JsonMapper.java:113-132 
+
+ 1. Aucun workflow d'approbation — MidPoint provisionne immédiatement dès que le rôle est assigné, sans validation humaine. Pas d'email, pas de "est-ce que ce compte est légitime ?".
+
+2. Couplage fort — si LDAP est down, MidPoint échoue directement et doit gérer lui-même les retries. Pas de queue pour absorber les pannes.
+
+3. Un connecteur Java complexe à écrire par service — chaque connecteur natif MidPoint doit implémenter toute la logique métier du service cible en Java + ConnId.
+
+4. Pas de logique métier centralisée — impossible d'ajouter "si le user est stagiaire + rôle admin → alerte" sans modifier chaque connecteur.
+
+5. Audit limité — MidPoint a son propre audit mais pas de traçabilité custom événement par événement avec stacktrace, retry count, DLQ.
+
+6. Multi-cible non géré — si un user doit être sur LDAP ET MySQL, MidPoint lance deux opérations indépendantes sans coordination.
+
+rabbitmq_consumer.py:436-476 — liste fixe de ce qui est extrait du JSON :
+
+
+attributes={
+    "firstName":          attributes.get("firstName"),
+    "lastName":           attributes.get("lastName"),
+    "email":              attributes.get("email"),
+    "fullName":           attributes.get("fullName"),
+    "description":        attributes.get("description"),
+    "telephoneNumber":    attributes.get("telephoneNumber"),
+    "mobile":             attributes.get("mobile"),
+    "title":              attributes.get("title"),
+    "organization":       attributes.get("organization"),
+    "organizationalUnit": attributes.get("organizationalUnit"),
+    "department":         attributes.get("department"),
+    "locality":           attributes.get("locality"),
+    "costCenter":         attributes.get("costCenter"),
+    "ldapGroups":         ldap_groups,
+    "odooGroups":         odoo_groups,
+    "enabled":            attributes.get("enabled", True),
+    "mysqlGrants":        attributes.get("mysqlGrants"),
+    "postgresqlGrants":   attributes.get("postgresqlGrants"),
+    ...
+}

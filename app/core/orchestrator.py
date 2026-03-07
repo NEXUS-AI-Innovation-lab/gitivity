@@ -373,14 +373,46 @@ class ProvisioningOrchestrator:
         # Load approvers list sorted by level
         approvers = self._load_approvers()
 
+        # Determine effective operation type:
+        # An UPDATE on a service with no prior provisioned state is effectively a CREATE
+        effective_op_type = operation_data["operation_type"]
+        if operation_data["operation_type"] == "UPDATE_USER":
+            try:
+                _approval_repo = await self._get_approval_repo()
+                _username = operation_data["user_data"].get("username", "")
+                _target_svc = operation_data["target_service"]
+                _old_state = await _approval_repo.get_user_state(_username, _target_svc)
+                if not _old_state:
+                    effective_op_type = "CREATE_USER"
+                    logger.info(
+                        f"Effective op for {_username}/{_target_svc}: CREATE (no prior state)"
+                    )
+            except Exception as _e:
+                logger.warning(f"Failed to detect effective op type: {_e}")
+
+        # Build enriched user_data for DELETE (use last known state from Redis)
+        enriched_user_data = dict(operation_data["user_data"])
+        if operation_data["operation_type"] == "DELETE_USER":
+            try:
+                _approval_repo = await self._get_approval_repo()
+                _username = operation_data["user_data"].get("username", "")
+                _target_svc = operation_data["target_service"]
+                _old_state = await _approval_repo.get_user_state(_username, _target_svc)
+                if _old_state:
+                    enriched_user_data["email"] = enriched_user_data.get("email") or _old_state.get("email")
+                    enriched_user_data["first_name"] = enriched_user_data.get("first_name") or _old_state.get("first_name")
+                    enriched_user_data["last_name"] = enriched_user_data.get("last_name") or _old_state.get("last_name")
+            except Exception as _e:
+                logger.warning(f"Failed to enrich DELETE payload: {_e}")
+
         payload = {
             "operation_id": operation_id,
             "request_id": request_id,
             "callback_url": f"{settings.GATEWAY_EXTERNAL_URL}/api/v1/provisioning/{operation_id}/approve-callback",
             "admin_email": settings.ADMIN_APPROVAL_EMAIL,
-            "operation_type": operation_data["operation_type"],
+            "operation_type": effective_op_type,
             "target_service": operation_data["target_service"],
-            "user_data": operation_data["user_data"],
+            "user_data": enriched_user_data,
             "approvers": [
                 {"email": a["email"], "name": a["name"], "level": a["level"]}
                 for a in approvers
@@ -687,13 +719,29 @@ class ProvisioningOrchestrator:
         user_data,
     ) -> ProvisioningResult:
         """Execute the specific operation on the connector"""
+        # Inject old_username for rename/delete detection on UPDATE and DELETE
+        attrs = dict(user_data.attributes or {})
+        if operation_type in (OperationType.UPDATE_USER, OperationType.DELETE_USER):
+            midpoint_uid = attrs.get("midpoint_uid")
+            current_username = user_data.username
+            if midpoint_uid and current_username:
+                try:
+                    approval_repo = await self._get_approval_repo()
+                    target_svc = connector.service_name.value if hasattr(connector.service_name, "value") else str(connector.service_name)
+                    old_username = await approval_repo.get_username_by_uid(midpoint_uid, target_svc)
+                    if old_username and old_username != current_username:
+                        attrs["old_username"] = old_username
+                        logger.info(f"Detected username rename: {old_username} → {current_username} on {target_svc}")
+                except Exception as _e:
+                    logger.warning(f"Failed to detect username rename: {_e}")
+
         if operation_type == OperationType.CREATE_USER:
             return await connector.provision_user(
                 username=user_data.username,
                 password=user_data.password,
                 email=user_data.email,
                 roles=user_data.roles,
-                attributes=user_data.attributes,
+                attributes=attrs,
             )
         elif operation_type == OperationType.UPDATE_USER:
             return await connector.update_user(
@@ -701,13 +749,13 @@ class ProvisioningOrchestrator:
                 password=user_data.password,
                 email=user_data.email,
                 roles=user_data.roles,
-                attributes=user_data.attributes,
+                attributes=attrs,
             )
         elif operation_type == OperationType.DELETE_USER:
             return await connector.delete_user(
                 username=user_data.username,
                 email=user_data.email,
-                attributes=user_data.attributes,
+                attributes=attrs,
             )
         else:
             raise ProvisioningError(
