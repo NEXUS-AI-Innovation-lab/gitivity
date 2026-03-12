@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     API_WORKERS: int = 1
     CORS_ORIGINS: list[str] = ["*"]
 
+    OLGA_BASE_URL: str = "http://localhost:9091"
+    OLGA_INVENTORY_ID: str = "Test-pre-provisioning"
 
 # Global settings instance
 settings = Settings()

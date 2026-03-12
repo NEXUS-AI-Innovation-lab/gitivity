@@ -1,4 +1,5 @@
 """Main orchestrator for provisioning operations"""
+import asyncio
 import logging
 import traceback
 import uuid
@@ -405,6 +406,14 @@ class ProvisioningOrchestrator:
             except Exception as _e:
                 logger.warning(f"Failed to enrich DELETE payload: {_e}")
 
+        # Build per-approver Olga URL (each approver gets a link with their own email)
+        def _olga_url(approver_email: str) -> str:
+            return (
+                f"{settings.OLGA_BASE_URL}/startTask"
+                f"?inventory_id={settings.OLGA_INVENTORY_ID}"
+                f"&email={approver_email}"
+            )
+
         payload = {
             "operation_id": operation_id,
             "request_id": request_id,
@@ -414,7 +423,12 @@ class ProvisioningOrchestrator:
             "target_service": operation_data["target_service"],
             "user_data": enriched_user_data,
             "approvers": [
-                {"email": a["email"], "name": a["name"], "level": a["level"]}
+                {
+                    "email": a["email"],
+                    "name": a["name"],
+                    "level": a["level"],
+                    "olga_task_url": _olga_url(a["email"]),
+                }
                 for a in approvers
             ],
         }
@@ -435,14 +449,27 @@ class ProvisioningOrchestrator:
             except Exception as e:
                 logger.warning(f"Failed to compute diff: {e}")
 
+        # Call n8n and Olga simultaneously (one Olga call per approver)
+        olga_urls = [a["olga_task_url"] for a in payload["approvers"]]
+
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                settings.N8N_APPROVAL_WEBHOOK_URL,
-                json=payload,
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            return response.json()
+            n8n_coro = client.post(settings.N8N_APPROVAL_WEBHOOK_URL, json=payload, timeout=10.0)
+            olga_coros = [client.get(url, timeout=10.0) for url in olga_urls]
+
+            results = await asyncio.gather(n8n_coro, *olga_coros, return_exceptions=True)
+
+        n8n_result = results[0]
+        if isinstance(n8n_result, Exception):
+            raise n8n_result
+        n8n_result.raise_for_status()
+
+        for i, olga_result in enumerate(results[1:]):
+            if isinstance(olga_result, Exception):
+                logger.warning(f"Olga call failed for approver {i}: {olga_result}")
+            else:
+                logger.info(f"Olga task started for approver {i}: {olga_result.status_code}")
+
+        return n8n_result.json()
 
     async def process_approval_response(
         self,
