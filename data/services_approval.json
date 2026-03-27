@@ -1,0 +1,8 @@
+{
+  "services": {
+    "LDAP": true,
+    "PostgreSQL": true,
+    "MySQL": true,
+    "Odoo": true
+  }
+}

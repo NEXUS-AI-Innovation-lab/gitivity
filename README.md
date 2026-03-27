@@ -403,3 +403,17 @@ pytest --cov=app --cov-report=html
 ## License
 
 MIT
+
+docker exec -it gitivity-postgresql psql -U target_user -d target_db -c "\du 888"
+# ou droits détaillés :
+docker exec -it gitivity-postgresql psql -U target_user -d target_db -c "SELECT * FROM pg_roles WHERE rolname='7777';"
+
+
+docker exec -it gitivity-mysql mysql -u root -pmysql_root_secret -e "SHOW GRANTS FOR '888'@'%';"
+# ou vérifier si le compte existe :
+docker exec -it gitivity-mysql mysql -u root -pmysql_root_secret -e "SELECT user, host, account_locked FROM mysql.user WHERE user='7777';"
+
+
+docker exec -it gitivity-ldap ldapsearch -x -H ldap://localhost:10389 -D "uid=admin,ou=system" -w secret -b "dc=openmicroscopy,dc=org" "(uid=7777)"
+
+docker exec -it gitivity-ldap ldapsearch -x -H ldap://localhost:10389 -D "uid=admin,ou=system" -w secret -b "dc=openmicroscopy,dc=org" "(member=uid=7777,ou=Users,dc=openmicroscopy,dc=org)" dn

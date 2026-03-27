@@ -190,6 +190,13 @@ class MySQLConnector(ProvisioningConnector):
                             await cursor.execute(grant_sql)
                             logger.debug(f"Granted {privilege} to {username}@{host}")
 
+                    # Disable account on create if enabled=false
+                    if not (attributes or {}).get("enabled", True):
+                        await cursor.execute(
+                            "ALTER USER %s@%s ACCOUNT LOCK", (username, host)
+                        )
+                        logger.info(f"Locked MySQL user on create: {username}@{host}")
+
                     await cursor.execute("FLUSH PRIVILEGES")
 
             return ProvisioningResult(

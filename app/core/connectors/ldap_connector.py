@@ -174,6 +174,12 @@ class LDAPConnector(ProvisioningConnector):
             )
 
         attrs = attributes or {}
+
+        # LDAP ne supporte pas le disable — supprimer si enabled=false
+        if not attrs.get("enabled", True):
+            logger.info(f"LDAP: enabled=false for {username}, deleting instead of disabling")
+            return await self.delete_user(username=username, attributes=attributes)
+
         ldap_groups = attrs.get("ldapGroups", [])
         if isinstance(ldap_groups, str):
             ldap_groups = [ldap_groups]
@@ -376,6 +382,12 @@ class LDAPConnector(ProvisioningConnector):
             )
 
         attrs = attributes or {}
+
+        # LDAP ne supporte pas le disable — supprimer si enabled=false
+        if not attrs.get("enabled", True):
+            logger.info(f"LDAP: enabled=false for {username}, deleting instead of disabling")
+            return await self.delete_user(username=username, attributes=attributes)
+
         ldap_groups = attrs.get("ldapGroups", [])
         if isinstance(ldap_groups, str):
             ldap_groups = [ldap_groups]
@@ -425,6 +437,29 @@ class LDAPConnector(ProvisioningConnector):
                     roles=roles,
                     attributes=attributes,
                 )
+
+            # Detect uid rename — LDAP RDN can't be modified in place, must delete + recreate
+            self._connection.search(
+                search_base=existing_dn,
+                search_filter="(objectClass=*)",
+                attributes=["uid"],
+            )
+            if self._connection.entries:
+                existing_entry = self._connection.entries[0]
+                uid_values = existing_entry.uid.values if hasattr(existing_entry, "uid") else []
+                existing_uid = uid_values[0] if uid_values else None
+                if isinstance(existing_uid, bytes):
+                    existing_uid = existing_uid.decode()
+                if existing_uid and existing_uid != username:
+                    logger.info(f"LDAP uid rename: {existing_uid} → {username}, deleting and recreating")
+                    await self.delete_user(username=existing_uid, attributes=attributes)
+                    return await self.provision_user(
+                        username=username,
+                        password=password,
+                        email=email,
+                        roles=roles,
+                        attributes=attributes,
+                    )
 
             # Update user attributes
             changes = {}

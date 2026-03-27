@@ -1,5 +1,4 @@
 """Main orchestrator for provisioning operations"""
-import asyncio
 import logging
 import traceback
 import uuid
@@ -9,6 +8,7 @@ import httpx
 from prisma import Prisma
 
 from app.config.settings import settings
+from app.utils.services_config import service_requires_approval
 from app.core.connectors.factory import ConnectorFactory
 from app.db.redis_client import RedisClient
 from app.db.repositories.approval_redis_repository import ApprovalRedisRepository
@@ -22,6 +22,30 @@ from app.utils.exceptions import ProvisioningError
 # Les workflows validation et notification ont été supprimés.
 
 logger = logging.getLogger(__name__)
+
+_SERVICE_KEYWORDS = {"postgresql", "postgres", "mysql", "ldap", "odoo"}
+
+# Préfixes d'attributs propres à chaque service — utilisé pour ignorer
+# les changements d'un autre service lors du calcul de diff.
+_SERVICE_ATTR_KEYWORDS: dict[str, list[str]] = {
+    "ldap": ["ldap"],
+    "postgresql": ["postgresql", "postgres"],
+    "mysql": ["mysql"],
+    "odoo": ["odoo"],
+}
+
+
+def _filter_roles_for_service(roles: list[str], target_service: str) -> list[str]:
+    """Keep only roles relevant to the target service or generic (no service keyword)."""
+    target_kw = target_service.lower()
+    result = []
+    for role in roles:
+        role_lower = role.lower()
+        if target_kw in role_lower:
+            result.append(role)
+        elif not any(kw in role_lower for kw in _SERVICE_KEYWORDS):
+            result.append(role)
+    return result
 
 
 class ProvisioningOrchestrator:
@@ -118,7 +142,7 @@ class ProvisioningOrchestrator:
                     old_state = await approval_repo.get_user_state(username, target_svc)
                     if old_state:
                         new_state = message.user_data.model_dump(mode="json")
-                        diff = self._compute_user_diff(old_state, new_state)
+                        diff = self._compute_user_diff(old_state, new_state, target_service=target_svc)
                         if not diff:
                             logger.info(
                                 f"No changes detected for {username} on {target_svc} - skipping"
@@ -136,7 +160,7 @@ class ProvisioningOrchestrator:
             await self._mark_validated(operation_id)
 
             # Step 3: Request approval via n8n approval workflow
-            if settings.APPROVAL_ENABLED:
+            if settings.APPROVAL_ENABLED and service_requires_approval(message.target_service.value):
                 await self._request_approval(operation_id, message)
                 logger.info(
                     f"Operation {operation_id} sent for approval. Waiting for callback.",
@@ -146,6 +170,19 @@ class ProvisioningOrchestrator:
 
             # Step 4: Provision to target service (if approval bypassed)
             await self._provision_to_target(operation_id, message)
+
+            # Snapshot state for future UPDATE diff checks (mirrors process_approval_response)
+            try:
+                approval_repo = await self._get_approval_repo()
+                username = message.user_data.username
+                if username:
+                    await approval_repo.store_user_state(
+                        username,
+                        message.target_service.value,
+                        message.user_data.model_dump(mode="json"),
+                    )
+            except Exception as _e:
+                logger.warning(f"Failed to store user state after direct provisioning: {_e}")
 
             logger.info(
                 f"Operation {operation_id} completed successfully",
@@ -312,8 +349,14 @@ class ProvisioningOrchestrator:
             logger.error(f"Failed to load approvers: {e}")
             return []
 
-    def _compute_user_diff(self, old_data: dict, new_data: dict) -> list[dict]:
-        """Compute diff between old and new user data
+    def _compute_user_diff(
+        self, old_data: dict, new_data: dict, target_service: str | None = None
+    ) -> list[dict]:
+        """Compute diff between old and new user data, scoped to target_service.
+
+        When target_service is provided, attributes and roles belonging to OTHER
+        services are ignored so that a PostgreSQL-only change doesn't trigger a
+        diff for Odoo (and vice-versa).
 
         Returns a list of {field, old_value, new_value} dicts for changed fields.
         """
@@ -329,15 +372,19 @@ class ProvisioningOrchestrator:
             old_val = old_data.get(field_key) or ""
             new_val = new_data.get(field_key) or ""
             if field_key == "password":
-                # Don't compare passwords, just detect if set
                 if new_val and new_val != old_val:
                     changes.append({"field": field_label, "old": "(ancien)", "new": "(modifie)"})
             elif str(old_val) != str(new_val) and new_val:
                 changes.append({"field": field_label, "old": str(old_val), "new": str(new_val)})
 
-        # Compare roles
-        old_roles = set(old_data.get("roles") or [])
-        new_roles = set(new_data.get("roles") or [])
+        # Compare roles — filtered by service when target_service is known
+        if target_service:
+            old_roles = set(_filter_roles_for_service(list(old_data.get("roles") or []), target_service))
+            new_roles = set(_filter_roles_for_service(list(new_data.get("roles") or []), target_service))
+        else:
+            old_roles = set(old_data.get("roles") or [])
+            new_roles = set(new_data.get("roles") or [])
+
         if old_roles != new_roles:
             added = new_roles - old_roles
             removed = old_roles - new_roles
@@ -353,10 +400,22 @@ class ProvisioningOrchestrator:
                 "details": " | ".join(role_parts),
             })
 
-        # Compare attributes
+        # Compare attributes — skip attributes belonging to other services
+        svc_lower = target_service.lower() if target_service else ""
+        other_svc_kws: list[str] = []
+        if target_service:
+            other_svc_kws = [
+                kw
+                for _, kws in _SERVICE_ATTR_KEYWORDS.items()
+                if not any(k in svc_lower for k in kws)
+                for kw in kws
+            ]
+
         old_attrs = old_data.get("attributes") or {}
         new_attrs = new_data.get("attributes") or {}
         for attr_key in set(list(old_attrs.keys()) + list(new_attrs.keys())):
+            if other_svc_kws and any(attr_key.lower().startswith(kw) for kw in other_svc_kws):
+                continue  # belongs to a different service
             old_val = str(old_attrs.get(attr_key, ""))
             new_val = str(new_attrs.get(attr_key, ""))
             if old_val != new_val and new_val:
@@ -406,13 +465,34 @@ class ProvisioningOrchestrator:
             except Exception as _e:
                 logger.warning(f"Failed to enrich DELETE payload: {_e}")
 
-        # Build per-approver Olga URL (each approver gets a link with their own email)
-        def _olga_url(approver_email: str) -> str:
-            return (
-                f"{settings.OLGA_BASE_URL}/startTask"
-                f"?inventory_id={settings.OLGA_INVENTORY_ID}"
-                f"&email={approver_email}"
-            )
+        # Prefill data to pass to frontend (keyed by field_hint)
+        prefill_by_hint = {
+            "Operation": effective_op_type,
+            "Utilisateur": enriched_user_data.get("username", ""),
+            "Email": enriched_user_data.get("email", ""),
+            "Prenom": enriched_user_data.get("first_name", ""),
+            "Nom": enriched_user_data.get("last_name", ""),
+            "Service": operation_data["target_service"],
+            "Roles": ", ".join(_filter_roles_for_service(
+                enriched_user_data.get("roles", []),
+                operation_data["target_service"],
+            )),
+        }
+
+        async with httpx.AsyncClient() as client:
+            for a in approvers:
+                try:
+                    olga_resp = await client.get(
+                        f"{settings.OLGA_BASE_URL}/startTask"
+                        f"?inventory_id={settings.OLGA_INVENTORY_ID}"
+                        f"&email={a['email']}",
+                        timeout=10.0,
+                    )
+                    task_id = olga_resp.json().get("task_id", "")
+                    if task_id:
+                        logger.info(f"Olga task {task_id} created for {a['email']}")
+                except Exception as e:
+                    logger.warning(f"Olga startTask failed for {a['email']}: {repr(e)}")
 
         payload = {
             "operation_id": operation_id,
@@ -422,13 +502,11 @@ class ProvisioningOrchestrator:
             "operation_type": effective_op_type,
             "target_service": operation_data["target_service"],
             "user_data": enriched_user_data,
+            "olga_start_url": f"{settings.OLGA_FRONT_URL}/start",
+            "olga_prefill": prefill_by_hint,
+            "n8n_base_url": settings.N8N_APPROVAL_WEBHOOK_URL.split("/webhook")[0],
             "approvers": [
-                {
-                    "email": a["email"],
-                    "name": a["name"],
-                    "level": a["level"],
-                    "olga_task_url": _olga_url(a["email"]),
-                }
+                {"email": a["email"], "name": a["name"], "level": a["level"]}
                 for a in approvers
             ],
         }
@@ -441,7 +519,7 @@ class ProvisioningOrchestrator:
                 target_svc = operation_data["target_service"]
                 old_state = await approval_repo.get_user_state(username, target_svc)
                 if old_state:
-                    diff = self._compute_user_diff(old_state, operation_data["user_data"])
+                    diff = self._compute_user_diff(old_state, operation_data["user_data"], target_service=target_svc)
                     payload["changes"] = diff
                     logger.info(f"Computed {len(diff)} changes for UPDATE {username} on {target_svc}")
                 else:
@@ -449,27 +527,13 @@ class ProvisioningOrchestrator:
             except Exception as e:
                 logger.warning(f"Failed to compute diff: {e}")
 
-        # Call n8n and Olga simultaneously (one Olga call per approver)
-        olga_urls = [a["olga_task_url"] for a in payload["approvers"]]
-
+        # Call n8n with enriched payload (olga_dash_url per approver)
         async with httpx.AsyncClient() as client:
-            n8n_coro = client.post(settings.N8N_APPROVAL_WEBHOOK_URL, json=payload, timeout=10.0)
-            olga_coros = [client.get(url, timeout=10.0) for url in olga_urls]
-
-            results = await asyncio.gather(n8n_coro, *olga_coros, return_exceptions=True)
-
-        n8n_result = results[0]
-        if isinstance(n8n_result, Exception):
-            raise n8n_result
-        n8n_result.raise_for_status()
-
-        for i, olga_result in enumerate(results[1:]):
-            if isinstance(olga_result, Exception):
-                logger.warning(f"Olga call failed for approver {i}: {olga_result}")
-            else:
-                logger.info(f"Olga task started for approver {i}: {olga_result.status_code}")
-
-        return n8n_result.json()
+            n8n_response = await client.post(
+                settings.N8N_APPROVAL_WEBHOOK_URL, json=payload, timeout=10.0
+            )
+            n8n_response.raise_for_status()
+            return n8n_response.json()
 
     async def process_approval_response(
         self,
@@ -962,5 +1026,5 @@ class ProvisioningOrchestrator:
             metadata=operation.original_message.get("metadata", {}),
         )
 
-        # Process the message again
-        await self.process_message(message)
+        # Provision directly without recreating the operation in DB
+        await self._provision_to_target(operation_id, message)

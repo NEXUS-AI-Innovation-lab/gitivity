@@ -117,6 +117,8 @@ class Settings(BaseSettings):
 
     OLGA_BASE_URL: str = "http://localhost:9091"
     OLGA_INVENTORY_ID: str = "Test-pre-provisioning"
+    OLGA_DASH_URL: str = "http://localhost:5173/dash"
+    OLGA_FRONT_URL: str = "http://localhost:5173"
 
 # Global settings instance
 settings = Settings()

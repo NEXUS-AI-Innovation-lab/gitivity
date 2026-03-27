@@ -291,9 +291,7 @@ class OdooConnector(ProvisioningConnector):
             if midpoint_attr in attrs and attrs[midpoint_attr] is not None:
                 user_vals[odoo_field] = attrs[midpoint_attr]
 
-        # Never deactivate during creation - new users must start active
-        # If MidPoint sends enabled=False, ignore it for CREATE (user can be disabled via UPDATE later)
-        deactivate_after_create = False
+        deactivate_after_create = not attrs.get("enabled", True)
 
         user_id = None
         employee_id = None
@@ -326,25 +324,62 @@ class OdooConnector(ProvisioningConnector):
                             existing_user_id = found_users[0]
                             logger.info(f"Found existing Odoo user by midpoint_uid {midpoint_uid} (id={existing_user_id})")
 
-                # Fallback: check by login — only if midpoint_uid is absent (no UID = can't distinguish users)
-                # Never match archived users by login alone: an archived user ≠ a new user with the same email
+                # Fallback: check by login (active users only)
+                # If midpoint_uid is set, verify the found user isn't already owned by a DIFFERENT MidPoint user
+                # (which would mean we're about to overwrite the wrong person's data)
                 if not existing_user_id:
                     existing = await self._execute(
                         "res.users", "search", [["login", "=", login]],
                         # active_test=True (default): only active users
                     )
                     if existing:
-                        existing_user_id = existing[0]
-                        logger.info(f"Found existing active Odoo user by login {login} (id={existing_user_id})")
+                        candidate_id = existing[0]
+                        if midpoint_uid:
+                            # Check partner ref to detect cross-user conflict
+                            cand_data = await self._execute("res.users", "read", [candidate_id], ["partner_id"])
+                            if cand_data and cand_data[0].get("partner_id"):
+                                cand_partner_id = cand_data[0]["partner_id"][0]
+                                cand_partner = await self._execute("res.partner", "read", [cand_partner_id], ["ref"])
+                                existing_ref = cand_partner[0].get("ref") if cand_partner else None
+                                if existing_ref and existing_ref != midpoint_uid:
+                                    logger.warning(
+                                        f"Login {login} matches Odoo user {candidate_id} already owned by "
+                                        f"midpoint_uid={existing_ref} (≠ {midpoint_uid}). Skipping to avoid overwrite."
+                                    )
+                                    # Don't set existing_user_id — Odoo will raise a uniqueness error on CREATE
+                                    # which is the correct outcome: this email conflict must be resolved manually
+                                else:
+                                    existing_user_id = candidate_id
+                                    logger.info(f"Found existing active Odoo user by login {login} (id={existing_user_id})")
+                        else:
+                            existing_user_id = candidate_id
+                            logger.info(f"Found existing active Odoo user by login {login} (id={existing_user_id})")
 
                 # Fallback: check by username as login (active users only)
-                if not existing_user_id and username != login:
-                    existing = await self._execute(
-                        "res.users", "search", [["login", "=", username]],
-                    )
-                    if existing:
-                        existing_user_id = existing[0]
-                        logger.info(f"Found existing active Odoo user by username {username} (id={existing_user_id})")
+                if not existing_user_id:
+                    if midpoint_uid or username != login:
+                        existing = await self._execute(
+                            "res.users", "search", [["login", "=", username]],
+                        )
+                        if existing:
+                            candidate_id = existing[0]
+                            if midpoint_uid:
+                                cand_data = await self._execute("res.users", "read", [candidate_id], ["partner_id"])
+                                if cand_data and cand_data[0].get("partner_id"):
+                                    cand_partner_id = cand_data[0]["partner_id"][0]
+                                    cand_partner = await self._execute("res.partner", "read", [cand_partner_id], ["ref"])
+                                    existing_ref = cand_partner[0].get("ref") if cand_partner else None
+                                    if existing_ref and existing_ref != midpoint_uid:
+                                        logger.warning(
+                                            f"Username {username} matches Odoo user {candidate_id} already owned by "
+                                            f"midpoint_uid={existing_ref} (≠ {midpoint_uid}). Skipping."
+                                        )
+                                    else:
+                                        existing_user_id = candidate_id
+                                        logger.info(f"Found existing active Odoo user by username {username} (id={existing_user_id})")
+                            else:
+                                existing_user_id = candidate_id
+                                logger.info(f"Found existing active Odoo user by username {username} (id={existing_user_id})")
 
                 # If user already exists, UPDATE instead of creating a duplicate
                 if existing_user_id:

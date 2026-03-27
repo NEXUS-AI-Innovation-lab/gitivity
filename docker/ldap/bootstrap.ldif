@@ -1,24 +1,27 @@
 # =============================================================================
-# groupes.ldif - Référence des groupes LDAP du projet
-# Ces groupes sont créés automatiquement via docker/ldap/bootstrap.ldif
-# Ce fichier est conservé comme documentation et pour import manuel
-# Base DN : dc=openmicroscopy,dc=org
+# Bootstrap LDIF - Structure initiale de l'annuaire LDAP
+# Chargé automatiquement au premier démarrage du conteneur osixia/openldap
 # =============================================================================
 
-# OU Utilisateurs
+# OU : Utilisateurs
 dn: ou=Users,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: organizationalUnit
 ou: Users
+description: Unité organisationnelle des utilisateurs
 
-# OU Groupes
+# OU : Groupes
 dn: ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: organizationalUnit
 ou: Groups
+description: Unité organisationnelle des groupes
 
-# --- Groupes Postes Windows & Ressources ---
+# =============================================================================
+# GROUPES MÉTIERS - Postes Windows & Ressources
+# =============================================================================
 
+# Groupe : Utilisateurs Poste Windows Standard (non admin)
 dn: cn=user-poste-windows-non-admin,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
@@ -26,81 +29,94 @@ cn: user-poste-windows-non-admin
 description: Utilisateurs postes Windows sans droits administrateur
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Administrateurs Locaux Windows
 dn: cn=user-windows-admin-local,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: user-windows-admin-local
-description: Utilisateurs avec droits administrateur local Windows
+description: Utilisateurs avec droits administrateur local sur poste Windows
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Accès Imprimantes
 dn: cn=user-imprimante,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: user-imprimante
-description: Accès imprimantes réseau
+description: Utilisateurs autorisés à accéder aux imprimantes réseau
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : SharePoint
 dn: cn=sharepoint,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: sharepoint
-description: Accès SharePoint
+description: Utilisateurs avec accès à la plateforme SharePoint
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Messagerie (Wemail)
 dn: cn=wemail,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: wemail
-description: Accès messagerie Wemail
+description: Utilisateurs avec accès à la messagerie Wemail
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Partage Disques Réseau
 dn: cn=partage-disks,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: partage-disks
-description: Accès partages disques réseau
+description: Utilisateurs autorisés à accéder aux partages disques réseau
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
-# --- Groupes Applicatifs ---
+# =============================================================================
+# GROUPES APPLICATIFS - Administration & Systèmes
+# =============================================================================
 
+# Groupe : Administrateurs système
 dn: cn=admins,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: admins
-description: Administrateurs système
+description: Administrateurs système - accès complet
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Développeurs
 dn: cn=developers,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: developers
-description: Équipe développement
+description: Équipe de développement
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Utilisateurs applications
 dn: cn=app-users,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: app-users
-description: Utilisateurs applications métiers
+description: Utilisateurs standards des applications métiers
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Administrateurs Odoo
 dn: cn=odoo-admin,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: odoo-admin
-description: Administrateurs ERP Odoo
+description: Administrateurs du système ERP Odoo
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : Utilisateurs VPN
 dn: cn=vpn-user,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: vpn-user
-description: Accès VPN production
+description: Utilisateurs autorisés à se connecter au VPN
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org
 
+# Groupe : VPN Test (environnement de tests)
 dn: cn=vpn-test,ou=Groups,dc=openmicroscopy,dc=org
 objectClass: top
 objectClass: groupOfUniqueNames
 cn: vpn-test
-description: Accès VPN tests
+description: Groupe VPN pour les environnements de tests
 uniqueMember: cn=admin,dc=openmicroscopy,dc=org

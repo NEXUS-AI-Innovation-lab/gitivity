@@ -357,6 +357,87 @@
             margin-bottom: 1.5rem;
             font-size: 0.85rem;
             color: var(--text-secondary);
+
+        /* Toggle switch */
+        .service-list {
+            background: var(--bg-secondary);
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .service-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .service-item:first-child {
+            border-top: none;
+        }
+
+        .service-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .service-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .service-status {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .toggle-label {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            cursor: pointer;
+        }
+
+        .toggle-label input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-card);
+            border-radius: 24px;
+            transition: 0.3s;
+            border: 1px solid var(--border);
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            top: 3px;
+            left: 3px;
+            transition: 0.3s;
+        }
+
+        .toggle-label input:checked + .toggle-slider {
+            background: rgba(34, 197, 94, 0.2);
+            border-color: var(--success);
+        }
+
+        .toggle-label input:checked + .toggle-slider::before {
+            background: var(--success);
+            transform: translateX(20px);
+        }
             line-height: 1.5;
         }
     </style>
@@ -410,6 +491,24 @@
                     <div class="spinner"></div>
                     Chargement...
                 </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2"/>
+                        <path d="M8 21h8M12 17v4"/>
+                    </svg>
+                    Approbation par service
+                </h2>
+            </div>
+            <div class="info-box" style="margin-bottom:1rem;">
+                Si un service est désactivé, les demandes le concernant sont provisionnées directement sans envoi d'email d'approbation.
+            </div>
+            <div class="service-list" id="services-container">
+                <div class="loading-state"><div class="spinner"></div>Chargement...</div>
             </div>
         </section>
     </main>
@@ -488,7 +587,7 @@
         let editingId = null;
         let deletingId = null;
 
-        document.addEventListener('DOMContentLoaded', loadApprovers);
+        document.addEventListener('DOMContentLoaded', () => { loadApprovers(); loadServices(); });
 
         async function loadApprovers() {
             try {
@@ -674,6 +773,64 @@
                 toast.style.opacity = '0';
                 setTimeout(() => toast.remove(), 300);
             }, 3000);
+        }
+
+        async function loadServices() {
+            try {
+                const res = await fetch('/api/v1/services/approval-config');
+                const config = await res.json();
+                renderServices(config);
+            } catch (e) {
+                document.getElementById('services-container').innerHTML =
+                    '<div class="empty-state">Erreur de chargement</div>';
+            }
+        }
+
+        function renderServices(config) {
+            const container = document.getElementById('services-container');
+            const entries = Object.entries(config);
+            if (entries.length === 0) {
+                container.innerHTML = '<div class="empty-state">Aucun service configuré</div>';
+                return;
+            }
+            container.innerHTML = entries.map(([name, required]) => `
+                <div class="service-item">
+                    <div class="service-info">
+                        <span class="service-name">${escapeHtml(name)}</span>
+                        <span class="service-status" id="status-${escapeHtml(name)}">
+                            ${required ? 'Approbation email requise' : 'Provisionnement direct (sans email)'}
+                        </span>
+                    </div>
+                    <label class="toggle-label" title="${required ? 'Désactiver l\'approbation' : 'Activer l\'approbation'}">
+                        <input type="checkbox" ${required ? 'checked' : ''}
+                            onchange="toggleService('${escapeAttr(name)}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        async function toggleService(name, requires) {
+            try {
+                const res = await fetch(`/api/v1/services/approval-config/${encodeURIComponent(name)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ requires_approval: requires })
+                });
+                if (res.ok) {
+                    const label = document.getElementById(`status-${name}`);
+                    if (label) label.textContent = requires
+                        ? 'Approbation email requise'
+                        : 'Provisionnement direct (sans email)';
+                    showToast(`${name} : ${requires ? 'approbation activée' : 'approbation désactivée'}`, 'success');
+                } else {
+                    showToast('Erreur lors de la mise à jour', 'error');
+                    loadServices();
+                }
+            } catch (e) {
+                showToast('Erreur de connexion', 'error');
+                loadServices();
+            }
         }
 
         document.addEventListener('keydown', (e) => {

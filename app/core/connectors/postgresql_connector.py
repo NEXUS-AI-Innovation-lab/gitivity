@@ -115,7 +115,7 @@ class PostgreSQLConnector(ProvisioningConnector):
 
         # Get attributes
         attrs = attributes or {}
-        can_login = attrs.get("can_login", True)
+        can_login = attrs.get("can_login", attrs.get("enabled", True))
         is_superuser = "superuser" in (roles or [])
         database = attrs.get("database", "target_db")  # Default database
 
