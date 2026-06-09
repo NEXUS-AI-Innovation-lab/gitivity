@@ -1,0 +1,81 @@
+================================================================================
+                    DOCKER & DOCKER COMPOSE — Gateway IAM
+================================================================================
+
+DOCKER-COMPOSE.YML
+Le fichier orchestre 14 services répartis en 4 profils.
+
+--------------------------------------------------------------------------------
+PROFIL CORE (toujours actif)
+--------------------------------------------------------------------------------
+Conteneur          Image / Build              Port       Rôle
+---------------------------------------------------------------------------
+postgres           postgres:15                5430       BDD principale Gateway IAM
+rabbitmq           rabbitmq:3-management      5672,15672 Message broker (MidPoint -> Consumer)
+redis              redis:7                    6379       Stockage états d'approbation
+gateway-api        Build ./                   8100       API FastAPI — orchestrateur principal
+gateway-consumer   Build ./                   —          Consumer RabbitMQ, traite les messages
+gateway-http       Build ./connecteur/        5100       Flask — expose les entitlements MidPoint
+approval-worker    Build ./approval_worker/   5101       Simulateur de workflow d'approbation
+n8n                n8nio/n8n                  5678       Workflow d'approbation multi-niveaux
+
+--------------------------------------------------------------------------------
+PROFIL "targets" (services cibles)
+--------------------------------------------------------------------------------
+Conteneur          Image        Port    Rôle
+---------------------------------------------------------------------------
+ldap               ApacheDS     —       Annuaire LDAP cible
+mysql-target       mysql:8      3306    Base MySQL cible
+postgres-target    postgres:15  5433    Base PostgreSQL cible
+odoo               odoo:16      8069    ERP Odoo cible
+
+--------------------------------------------------------------------------------
+PROFIL "midpoint"
+--------------------------------------------------------------------------------
+Conteneur          Rôle
+---------------------------------------------------------------------------
+midpoint-db        BDD dédiée MidPoint
+midpoint           Serveur IAM MidPoint (port 8080)
+
+--------------------------------------------------------------------------------
+PROFIL "testing"
+--------------------------------------------------------------------------------
+Conteneur          Rôle
+---------------------------------------------------------------------------
+mock-n8n           Simule n8n pour les tests automatisés (port 8000)
+
+================================================================================
+DOCKERFILES
+================================================================================
+Fichier                          Base             Port    Rôle
+---------------------------------------------------------------------------
+approval_worker/Dockerfile       python:3.11-slim 5001    Travailleur d'approbation Flask
+connector-dashboard/Dockerfile   python:3.11-slim 5002    Dashboard connecteurs Flask
+docker/mock-n8n/Dockerfile       python:3.11-slim 8000    Mock n8n FastAPI (tests)
+
+================================================================================
+VARIABLES D'ENVIRONNEMENT
+================================================================================
+Fichier          Usage
+---------------------------------------------------------------------------
+.env.example     Template — services sur localhost
+.env.docker      Docker — hostnames = noms de conteneurs
+.env.test        Tests automatisés — mock n8n
+
+IMPORTANT : en mode Docker, utiliser .env.docker où tous les hôtes sont les
+noms de conteneurs (postgres, rabbitmq, redis...). MidPoint utilise 172.17.0.1
+pour accéder aux services sur l'hôte Docker.
+
+================================================================================
+LANCEMENT RAPIDE
+================================================================================
+# Core uniquement
+docker-compose up -d
+
+# Avec les services cibles
+docker-compose --profile targets up -d
+
+# Avec MidPoint
+docker-compose --profile midpoint up -d
+
+================================================================================

@@ -353,6 +353,7 @@ services:
       - midpoint
 
   midpoint_server:
+    container_name: gitivity-midpoint
     image: evolveum/midpoint:${MP_VER:-latest}-alpine
     depends_on:
       data_init:

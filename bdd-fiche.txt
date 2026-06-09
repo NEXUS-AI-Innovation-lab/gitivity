@@ -1,0 +1,112 @@
+================================================================================
+                    BASES DE DONNÉES — Gateway IAM
+================================================================================
+
+L'application utilise une architecture multi-bases : une base principale pour
+le suivi des opérations, un cache Redis, et des bases cibles pour le
+provisionnement des identités.
+
+================================================================================
+1. BASE PRINCIPALE — PostgreSQL (Gateway IAM)
+================================================================================
+Rôle        : Stockage persistant de toutes les opérations de provisionnement
+Conteneur   : postgres (port 5430 / 5432 en interne)
+Image       : postgres:15-alpine
+Credentials : gateway / gateway_secret
+Base        : gateway_iam
+ORM         : Prisma (schema.prisma)
+
+Tables :
+---------------------------------------------------------------------------
+ProvisioningOperation  Table centrale (~38 champs). Suit le cycle de vie
+                       complet d'une opération : création, validation,
+                       approbation, provisionnement, résultat, retry.
+                       Statuts : PENDING -> VALIDATING -> VALIDATED ->
+                       APPROVAL_PENDING -> PROCESSING -> SUCCESS / FAILED
+                       / RETRYING / DLQ
+
+AuditLog               Journal de toutes les transitions d'état. Liée à
+                       ProvisioningOperation (clé étrangère operation_id).
+                       Stocke : événement, acteur, données avant/après.
+
+DeadLetterQueue        Opérations définitivement échouées après épuisement
+                       des retries. Contient le motif d'échec et un statut
+                       de résolution.
+
+SystemMetrics          Snapshots métriques système (volumes, taux de succès,
+                       latences) pour monitoring et reporting.
+
+Enums :
+  OperationType : CREATE_USER, UPDATE_USER, DELETE_USER,
+                  CREATE_ROLE, UPDATE_ROLE, ASSIGN_ROLE, REVOKE_ROLE
+  OperationStatus : PENDING, VALIDATING, VALIDATED, APPROVAL_PENDING,
+                    PROCESSING, SUCCESS, FAILED, RETRYING, DLQ
+  TargetService   : MYSQL, POSTGRESQL, ODOO, LDAP
+
+================================================================================
+2. CACHE — Redis
+================================================================================
+Rôle        : Stockage temporaire des états de workflow (non persisté)
+Conteneur   : redis (port 6379)
+Image       : redis:7-alpine
+Client      : redis_client.py (singleton async, pool de connexions)
+
+Clés utilisées :
+---------------------------------------------------------------------------
+pending_approval:{id}        Données d'approbation en attente (TTL : 2h)
+rejected_create:{user}:{svc} Marqueur de CREATE rejeté pour détecter les
+                             UPDATE/DELETE suivants (TTL : 30 jours)
+user_state:{user}:{svc}      État utilisateur pour diff lors des UPDATE
+                             (TTL : 90 jours)
+
+================================================================================
+3. BASES CIBLES (services provisionnés)
+================================================================================
+Ces bases sont les destinations finales des opérations de provisionnement.
+Elles sont gérées via les connecteurs (ldap, postgresql, mysql, odoo).
+
+---------------------------------------------------------------------------
+LDAP (ApacheDS)
+  Conteneur : ldap (port 10389)
+  Usage     : Annuaire d'entreprise. Les utilisateurs sont créés dans
+              ou=Users et ajoutés comme members des groupes LDAP.
+
+MySQL (cible)
+  Conteneur : mysql-target (port 3306) — Image : mysql:8.0
+  Usage     : Base applicative cible. Les comptes sont créés avec les
+              droits mappés : readonly=SELECT, readwrite=SELECT+INSERT+
+              UPDATE+DELETE, admin=ALL PRIVILEGES
+
+PostgreSQL (cible)
+  Conteneur : postgresql-target (port 5433) — Image : postgres:15-alpine
+  Usage     : Base applicative cible. Droits via rôles PostgreSQL :
+              readonly -> pg_read_all_data
+              readwrite -> pg_read_all_data + pg_write_all_data
+
+Odoo (ERP)
+  Conteneur : odoo (port 8069) — Image : odoo:17
+  BDD Odoo  : odoo-db (PostgreSQL interne, port 5434)
+  Usage     : ERP cible. Connexion via XML-RPC. Gestion des utilisateurs
+              et de leurs droits applicatifs.
+
+================================================================================
+4. BASE MIDPOINT (profil optionnel)
+================================================================================
+Conteneur   : midpoint_data (port non exposé) — Image : postgres:16-alpine
+Usage       : Base dédiée au serveur MidPoint IAM. Contient le référentiel
+              des identités, rôles, ressources et politiques d'accès.
+
+================================================================================
+RÉSUMÉ DES CONNEXIONS
+================================================================================
+Service            Host (local)      Host (Docker)      Port
+---------------------------------------------------------------------------
+Gateway IAM DB     localhost         postgres           5430 / 5432
+Redis              localhost         redis              6379
+MySQL cible        localhost         mysql-target       3306
+PostgreSQL cible   localhost         postgresql-target  5433
+Odoo               localhost         odoo               8069
+LDAP               localhost         ldap               10389
+MidPoint           localhost         midpoint           8080
+
+================================================================================
