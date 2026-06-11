@@ -18,6 +18,9 @@ httpx
 # Redis (for approval workflow)
 redis[hiredis]>=5.0.1
 
+# SMTP async (approval + confirmation emails)
+aiosmtplib
+
 # Target Service Connectors
 # MySQL
 aiomysql
@@ -32,7 +35,7 @@ odoorpc
 # LDAP
 ldap3
 
-# Web Framework (approval_worker, connector-dashboard, connecteur)
+# Web Framework (connector-dashboard, gateway-http)
 flask
 requests
 

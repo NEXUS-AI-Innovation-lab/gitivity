@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# Gateway IAM — End-to-End Ansible Playbook
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml site.yml \
+#     -e "server_ip=<YOUR_IP>" \
+#     [-e "smtp_user=you@gmail.com" -e "smtp_password=xxxx"] \
+#     [-e "approval_mode=auto"] \
+#     [-e "with_targets=true"] \
+#     [-e "with_midpoint=false"] \
+#     [-e "skip_build=true"]
+#
+# The PEM key is expected at ~/Downloads/ansible.pem (see inventory/hosts.yml).
+# =============================================================================
+
+- name: Gateway IAM — full setup
+  hosts: all
+  gather_facts: true
+  become: false
+
+  pre_tasks:
+    - name: Show target server
+      ansible.builtin.debug:
+        msg: "Deploying to {{ ansible_host }} ({{ server_ip }})"
+
+  roles:
+    # 1 — Install Docker, Java, jq, etc.
+    - role: prereqs
+
+    # 2 — Sync code, write .env.docker, patch docker-compose, build + start
+    - role: deploy
+
+    # 3 — Wait for every service to be ready
+    - role: wait_services
+
+    # 4 — Build & deploy MidPoint connector, import resource + roles
+    - role: midpoint
+      when: with_midpoint | default(true) | bool
+
+  post_tasks:
+    - name: Print service URLs
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════╗
+          ║           Gateway IAM — Setup Complete!                  ║
+          ╠══════════════════════════════════════════════════════════╣
+          ║  Gateway API      →  http://{{ server_ip }}:8100
+          ║  Gateway HTTP     →  http://{{ server_ip }}:5100
+          ║  RabbitMQ UI      →  http://{{ server_ip }}:15672  (guest/guest)
+          ║  MidPoint         →  http://{{ server_ip }}:8080/midpoint
+          ║                       (administrator / Test5ecr3t)
+          ╚══════════════════════════════════════════════════════════╝

@@ -6,7 +6,7 @@ plugins {
 ext {
     connidVersion = '1.5.0.17'
     polygonVersion = '3.0.1'
-    connectorName = 'lu.lns.connector.restgateway'
+    connectorName = 'GateWay-IAM'
 }
 
 java {

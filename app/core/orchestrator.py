@@ -1,10 +1,10 @@
 """Main orchestrator for provisioning operations"""
+import asyncio
 import logging
 import traceback
 import uuid
 from datetime import datetime, timezone
 
-import httpx
 from prisma import Prisma
 
 from app.config.settings import settings
@@ -13,12 +13,10 @@ from app.db.redis_client import RedisClient
 from app.db.repositories.approval_redis_repository import ApprovalRedisRepository
 from app.db.repositories.provisioning_repository import ProvisioningRepository
 from app.models.domain import MidPointMessage, ProvisioningResult
+from app.services.approval_service import ApprovalService
 from app.services.audit_service import AuditService
 from app.utils.enums import OperationStatus, OperationType, TargetService
 from app.utils.exceptions import ProvisioningError
-
-# NOTE: n8n est utilisé UNIQUEMENT pour l'approbation (approval-workflow).
-# Les workflows validation et notification ont été supprimés.
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +28,7 @@ class ProvisioningOrchestrator:
     user provisioning operations received from MidPoint.
     """
 
-    def __init__(self, db: Prisma, n8n_client=None) -> None:
+    def __init__(self, db: Prisma) -> None:
         self._db = db
         self._repo = ProvisioningRepository(db)
         self._audit = AuditService(db)
@@ -49,8 +47,8 @@ class ProvisioningOrchestrator:
         This is the main entry point for processing incoming messages.
         It orchestrates the full flow:
         1. Create operation record (PENDING)
-        2. Validate with n8n (VALIDATING -> VALIDATED)
-        3. Request approval (APPROVAL_PENDING) - NEW
+        2. Mark as VALIDATED
+        3. Request approval (APPROVAL_PENDING) - email chain or auto mode
         4. Provision to target (PROCESSING -> SUCCESS/FAILED)
         5. Send notification
 
@@ -131,10 +129,10 @@ class ProvisioningOrchestrator:
                 except Exception as e:
                     logger.warning(f"Failed to check for changes, proceeding: {e}")
 
-            # Step 2: Mark as VALIDATED directly (no n8n validation workflow)
+            # Step 2: Mark as VALIDATED directly (no validation workflow)
             await self._mark_validated(operation_id)
 
-            # Step 3: Request approval via n8n approval workflow
+            # Step 3: Request approval (in-app email chain or auto mode)
             if settings.APPROVAL_ENABLED:
                 await self._request_approval(operation_id, message)
                 logger.info(
@@ -213,7 +211,7 @@ class ProvisioningOrchestrator:
         operation_id: str,
         message: MidPointMessage,
     ) -> None:
-        """Request approval from Flask worker and store in Redis"""
+        """Request approval (in-app chain) and store pending state in Redis"""
         try:
             # Update status to APPROVAL_PENDING
             await self._update_status(
@@ -247,7 +245,7 @@ class ProvisioningOrchestrator:
             # Generate approval request ID
             approval_request_id = str(uuid.uuid4())
 
-            # Send approval request to Flask worker
+            # Start the approval chain (email mode) or schedule auto-approval
             await self._send_approval_request(
                 operation_id=operation_id,
                 request_id=approval_request_id,
@@ -268,12 +266,12 @@ class ProvisioningOrchestrator:
             await self._audit.log_approval_requested(
                 operation_id=operation_id,
                 approval_request_id=approval_request_id,
-                worker_url=settings.APPROVAL_WORKER_URL,
+                worker_url=f"in-app:{settings.APPROVAL_MODE}",
             )
 
             logger.info(
-                f"Approval requested for operation {operation_id}. "
-                f"Worker will decide in {settings.APPROVAL_SLEEP_DURATION} seconds.",
+                f"Approval requested for operation {operation_id} "
+                f"(mode: {settings.APPROVAL_MODE}). Waiting for decision.",
                 extra={
                     "operation_id": operation_id,
                     "approval_request_id": approval_request_id,
@@ -368,26 +366,22 @@ class ProvisioningOrchestrator:
         operation_id: str,
         request_id: str,
         operation_data: dict,
-    ) -> dict:
-        """Send approval request to n8n workflow via HTTP POST"""
+    ) -> None:
+        """Start the in-app approval chain (email mode) or schedule auto-approval"""
+        if settings.APPROVAL_MODE == "auto":
+            # Test/dev mode: approve automatically after a delay, no email
+            asyncio.create_task(self._auto_approve(operation_id))
+            logger.info(
+                f"Auto-approval scheduled for operation {operation_id} "
+                f"in {settings.AUTO_APPROVE_DELAY}s"
+            )
+            return
+
         # Load approvers list sorted by level
         approvers = self._load_approvers()
 
-        payload = {
-            "operation_id": operation_id,
-            "request_id": request_id,
-            "callback_url": f"{settings.GATEWAY_EXTERNAL_URL}/api/v1/provisioning/{operation_id}/approve-callback",
-            "admin_email": settings.ADMIN_APPROVAL_EMAIL,
-            "operation_type": operation_data["operation_type"],
-            "target_service": operation_data["target_service"],
-            "user_data": operation_data["user_data"],
-            "approvers": [
-                {"email": a["email"], "name": a["name"], "level": a["level"]}
-                for a in approvers
-            ],
-        }
-
         # For UPDATE, compute diff with previous state
+        changes: list[dict] | None = None
         if operation_data["operation_type"] == "UPDATE_USER":
             try:
                 approval_repo = await self._get_approval_repo()
@@ -395,22 +389,44 @@ class ProvisioningOrchestrator:
                 target_svc = operation_data["target_service"]
                 old_state = await approval_repo.get_user_state(username, target_svc)
                 if old_state:
-                    diff = self._compute_user_diff(old_state, operation_data["user_data"])
-                    payload["changes"] = diff
-                    logger.info(f"Computed {len(diff)} changes for UPDATE {username} on {target_svc}")
+                    changes = self._compute_user_diff(old_state, operation_data["user_data"])
+                    logger.info(f"Computed {len(changes)} changes for UPDATE {username} on {target_svc}")
                 else:
                     logger.info(f"No previous state for {username} on {target_svc}, cannot compute diff")
             except Exception as e:
                 logger.warning(f"Failed to compute diff: {e}")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                settings.N8N_APPROVAL_WEBHOOK_URL,
-                json=payload,
-                timeout=10.0,
+        approval_repo = await self._get_approval_repo()
+        approval_service = ApprovalService(approval_repo)
+        await approval_service.start_chain(
+            operation_id=operation_id,
+            request_id=request_id,
+            operation_type=operation_data["operation_type"],
+            target_service=operation_data["target_service"],
+            user_data=operation_data["user_data"],
+            approvers=[
+                {"email": a["email"], "name": a["name"], "level": a["level"]}
+                for a in approvers
+            ],
+            changes=changes,
+            admin_email=settings.ADMIN_APPROVAL_EMAIL,
+        )
+
+    async def _auto_approve(self, operation_id: str) -> None:
+        """Approve automatically after AUTO_APPROVE_DELAY (APPROVAL_MODE=auto).
+
+        Replacement for the former Flask approval worker, used in tests/dev.
+        """
+        try:
+            await asyncio.sleep(settings.AUTO_APPROVE_DELAY)
+            await self.process_approval_response(
+                operation_id=operation_id,
+                approved=True,
+                reason=f"Auto-approved after {settings.AUTO_APPROVE_DELAY}s",
+                worker_id="auto-approval",
             )
-            response.raise_for_status()
-            return response.json()
+        except Exception as e:
+            logger.error(f"Auto-approval failed for operation {operation_id}: {e}")
 
     async def process_approval_response(
         self,
@@ -419,10 +435,10 @@ class ProvisioningOrchestrator:
         reason: str,
         worker_id: str,
     ) -> None:
-        """Process approval decision from Flask worker callback
+        """Process a terminal approval decision
 
-        This method is called by the API endpoint when the Flask worker
-        sends the approval decision after sleeping.
+        Called by the approval chain (email mode), the auto-approval task
+        (auto mode), or the manual approve-callback endpoint.
 
         Args:
             operation_id: The operation being approved/rejected

@@ -94,19 +94,6 @@ def sample_provisioning_result_failure() -> ProvisioningResult:
 
 
 @pytest.fixture
-def mock_n8n_client() -> AsyncMock:
-    """Mock n8n client"""
-    client = AsyncMock()
-    client.validate = AsyncMock(return_value=ValidationResponse(
-        approved=True,
-        validation_id="val-mock",
-    ))
-    client.notify_success = AsyncMock(return_value=True)
-    client.notify_failure = AsyncMock(return_value=True)
-    return client
-
-
-@pytest.fixture
 def mock_connector() -> AsyncMock:
     """Mock provisioning connector"""
     connector = AsyncMock()

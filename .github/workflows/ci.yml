@@ -19,8 +19,8 @@ jobs:
       RABBITMQ_PASSWORD: "guest"
       RABBITMQ_QUEUE: "gateway-iam-provisioning"
       REDIS_URL: "redis://localhost:6379"
-      N8N_VALIDATION_WEBHOOK_URL: "http://localhost:8101/webhook/validation"
-      N8N_NOTIFICATION_WEBHOOK_URL: "http://localhost:8101/webhook/notification"
+      APPROVAL_MODE: "auto"
+      AUTO_APPROVE_DELAY: 2
       RETRY_MAX_ATTEMPTS: 3
       RETRY_INITIAL_DELAY: 5
       RETRY_BACKOFF_MULTIPLIER: 2.0

@@ -1,0 +1,61 @@
+---
+# Install system prerequisites: Docker, Docker Compose plugin, Java 17, jq, curl, git, rsync
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - git
+      - jq
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - rsync
+      - python3-pip
+    state: present
+  become: true
+
+- name: Install Java 17 (MidPoint connector build only)
+  ansible.builtin.apt:
+    name: openjdk-17-jdk-headless
+    state: present
+  become: true
+  when: with_midpoint | bool
+
+# Ubuntu archive packages: available on all releases including brand-new ones
+# (download.docker.com lags behind new Ubuntu versions)
+- name: Install Docker Engine and Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+      - docker-buildx
+    state: present
+  become: true
+
+- name: Enable and start Docker service
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  become: true
+
+- name: Add ansible_user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+  become: true
+
+# New group membership only applies to new SSH sessions
+- name: Reset SSH connection to pick up docker group
+  ansible.builtin.meta: reset_connection
+
+# Gradle wrapper needs execute permission — handled in deploy role after rsync

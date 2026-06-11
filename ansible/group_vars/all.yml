@@ -1,0 +1,44 @@
+# =============================================================================
+# Gateway IAM — Ansible variables
+# Override at runtime: ansible-playbook site.yml -e "smtp_user=you@gmail.com"
+# =============================================================================
+
+# --- Project ------------------------------------------------------------------
+project_dir: /opt/gitivity
+project_repo_src: "{{ playbook_dir | dirname }}"   # local path of the repo
+
+# --- Server IP (used in approval email links and service URLs) ----------------
+# Set via: ansible-playbook site.yml -e "server_ip=10.10.0.1"
+server_ip: "{{ ansible_host }}"
+
+# --- Profiles -----------------------------------------------------------------
+with_targets: false     # set true to also start LDAP/MySQL/PostgreSQL/Odoo
+with_midpoint: true     # set false to skip MidPoint setup
+
+# --- SMTP (approval + confirmation emails) ------------------------------------
+# Gmail app password recommended. Leave empty + approval_mode=auto for testing.
+smtp_user: ""
+smtp_password: ""
+approval_mode: email   # email | auto
+
+# --- MidPoint -----------------------------------------------------------------
+midpoint_admin_user: administrator
+midpoint_admin_password: Test5ecr3t
+# localhost: the REST/health tasks run ON the target host (AWS blocks hairpin to own public IP)
+midpoint_url: "http://localhost:8080/midpoint"
+
+# Bundle name comes from the gradle project name (settings.gradle)
+connector_bundle: GateWay-IAM
+# Former bundle name still present in ressource.xml's connectorConfiguration namespace
+old_connector_bundle_ns: lu.lns.connector.restgateway
+connector_version: 1.2.0-SNAPSHOT
+# settings.gradle rootProject.name = 'GateWay-IAM' determines the JAR file name
+jar_name: GateWay-IAM-1.2.0-SNAPSHOT.jar
+old_connector_oid: 84505b3d-5f90-4617-a160-6548be000a44
+resource_oid: 736ea741-2c73-4478-b5d1-07d84cdf860f
+old_resource_oid_in_roles: 3447776b-105c-4663-a025-5b27568ee091
+
+# --- Timeouts -----------------------------------------------------------------
+service_wait_timeout: 300
+service_wait_delay: 10
+midpoint_connector_wait_timeout: 120

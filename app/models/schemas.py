@@ -214,12 +214,12 @@ class MetricsResponse(BaseModel):
 
 
 class ApprovalCallbackRequest(BaseModel):
-    """Request schema for approval callback from Flask worker"""
+    """Request schema for manual approval decisions"""
 
     approved: bool = Field(..., description="Whether the operation was approved")
     reason: str = Field(..., description="Reason for approval/rejection")
     worker_id: str = Field(
-        default="flask-approval-worker", description="ID of the worker making decision"
+        default="manual", description="ID of the worker making decision"
     )
     request_id: str | None = Field(None, description="Original request ID")
     decided_at: str | None = Field(None, description="ISO 8601 timestamp of decision")

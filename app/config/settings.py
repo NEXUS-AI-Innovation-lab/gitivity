@@ -41,9 +41,6 @@ class Settings(BaseSettings):
     KAFKA_AUTO_OFFSET_RESET: str = "earliest"
     KAFKA_ENABLE_AUTO_COMMIT: bool = True
 
-    # n8n Integration (approval workflow only)
-    N8N_TIMEOUT: int = 10  # seconds
-
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -52,13 +49,19 @@ class Settings(BaseSettings):
 
     # Approval Workflow Configuration
     APPROVAL_ENABLED: bool = True  # Set to False to bypass approval (useful in dev/test)
-    APPROVAL_WORKER_URL: str = "http://localhost:5101"
-    APPROVAL_SLEEP_DURATION: int = 3600  # How long n8n waits for a decision before timeout
+    APPROVAL_MODE: Literal["email", "auto"] = "email"  # auto = auto-approve after delay (tests)
+    AUTO_APPROVE_DELAY: int = 5  # seconds before auto-approval (APPROVAL_MODE=auto only)
+    ADMIN_APPROVAL_EMAIL: str = "samiourrad2005@example.com"  # fallback when approvers.json is empty
+    GATEWAY_EXTERNAL_URL: str = "http://localhost:8100"  # Public URL used in approval email links
 
-    # n8n Approval Workflow
-    N8N_APPROVAL_WEBHOOK_URL: str = "http://localhost:5678/webhook/approval"
-    ADMIN_APPROVAL_EMAIL: str = "samiourrad2005@example.com"
-    GATEWAY_EXTERNAL_URL: str = "http://localhost:8100"  # Public URL used by n8n to call back the gateway
+    # SMTP (approval + confirmation emails)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""  # falls back to SMTP_USER when empty
+    SMTP_STARTTLS: bool = True
+    SMTP_TIMEOUT: int = 30
 
     # Retry Configuration
     RETRY_MAX_ATTEMPTS: int = 3

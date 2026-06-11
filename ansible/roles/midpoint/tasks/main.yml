@@ -1,0 +1,232 @@
+---
+# Build connector JAR, deploy to MidPoint, discover OID, import resource + roles
+
+# ------------------------------------------------------------------
+# 1. Build
+# ------------------------------------------------------------------
+- name: Build MidPoint connector JAR with Gradle
+  ansible.builtin.command:
+    cmd: ./gradlew clean jar
+    chdir: "{{ project_dir }}/midpoint-connector"
+  register: gradle_build
+  changed_when: gradle_build.rc == 0
+  when: not skip_build | default(false)
+
+- name: Verify JAR exists
+  ansible.builtin.stat:
+    path: "{{ project_dir }}/midpoint-connector/build/libs/{{ jar_name }}"
+  register: jar_stat
+
+- name: Fail if JAR not found
+  ansible.builtin.fail:
+    msg: "JAR not found at {{ project_dir }}/midpoint-connector/build/libs/{{ jar_name }}"
+  when: not jar_stat.stat.exists
+
+# ------------------------------------------------------------------
+# 2. Deploy JAR
+# ------------------------------------------------------------------
+- name: Copy JAR into MidPoint container
+  ansible.builtin.command:
+    cmd: >
+      docker cp
+      {{ project_dir }}/midpoint-connector/build/libs/{{ jar_name }}
+      gitivity-midpoint:/opt/midpoint/var/icf-connectors/{{ jar_name }}
+  register: docker_cp_jar
+  changed_when: docker_cp_jar.rc == 0
+
+- name: Restart MidPoint to load connector
+  ansible.builtin.command:
+    cmd: docker restart gitivity-midpoint
+  register: mp_restart
+  changed_when: mp_restart.rc == 0
+
+- name: Wait for MidPoint to come back after restart
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/self"
+    method: GET
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: 60
+  delay: 10
+
+- name: Wait for connector framework to pick up new JAR
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/connectors"
+    method: GET
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    return_content: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: connectors_resp
+  until: >
+    ((connectors_resp.content | default("{}") | from_json).object.object | default([]) | length > 0) or
+    ((connectors_resp.content | default("{}") | from_json).object | default([]) | length > 0)
+  retries: 12
+  delay: 10
+  ignore_errors: true
+
+# ------------------------------------------------------------------
+# 3. Discover connector OID
+# ------------------------------------------------------------------
+- name: Fetch connector list from MidPoint
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/connectors"
+    method: GET
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    return_content: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: mp_connectors
+
+- name: Parse connector list
+  ansible.builtin.set_fact:
+    mp_connector_list: >-
+      {{ ((mp_connectors.content | from_json).object.object
+          | default((mp_connectors.content | from_json).object, true))
+         | default([], true) }}
+
+- name: Extract connector OID by bundle + version
+  ansible.builtin.set_fact:
+    connector_oid: >-
+      {{ (mp_connector_list
+          | selectattr('connectorBundle', 'equalto', connector_bundle)
+          | selectattr('connectorVersion', 'equalto', connector_version)
+          | map(attribute='oid') | list | first)
+         | default(
+             mp_connector_list
+             | selectattr('connectorBundle', 'equalto', connector_bundle)
+             | map(attribute='oid') | list | first
+             | default(''),
+             true) }}
+
+- name: Fail if connector OID not found
+  ansible.builtin.fail:
+    msg: >
+      Connector '{{ connector_bundle }}' not found in MidPoint.
+      Check: docker logs gitivity-midpoint
+  when: connector_oid == '' or connector_oid == None
+
+- name: Show discovered connector OID
+  ansible.builtin.debug:
+    msg: "Connector OID: {{ connector_oid }}"
+
+# ------------------------------------------------------------------
+# 4. Import resource
+# ------------------------------------------------------------------
+- name: Create patched resource XML with real connector OID
+  ansible.builtin.replace:
+    path: "{{ project_dir }}/midpoint/ressource.xml"
+    regexp: "{{ old_connector_oid }}"
+    replace: "{{ connector_oid }}"
+
+# The connectorConfiguration namespace embeds the bundle name; it must match
+# the deployed connector or MidPoint fails with "delta does not have complete definition"
+- name: Patch connector bundle namespace in resource XML
+  ansible.builtin.replace:
+    path: "{{ project_dir }}/midpoint/ressource.xml"
+    regexp: "bundle/{{ old_connector_bundle_ns | regex_escape }}/"
+    replace: "bundle/{{ connector_bundle }}/"
+
+# slurp: the patched XML lives on the remote host, not the control machine
+- name: Read patched resource XML
+  ansible.builtin.slurp:
+    src: "{{ project_dir }}/midpoint/ressource.xml"
+  register: resource_xml_content
+
+- name: POST resource to MidPoint (create)
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/resources"
+    method: POST
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    body: "{{ resource_xml_content.content | b64decode }}"
+    headers:
+      Content-Type: application/xml
+    # 500: MidPoint returns it (not 409) when the OID already exists
+    status_code: [200, 201, 202, 204, 409, 500]
+  register: resource_post
+
+- name: PUT resource to MidPoint (update if already exists)
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/resources/{{ resource_oid }}"
+    method: PUT
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    body: "{{ resource_xml_content.content | b64decode }}"
+    headers:
+      Content-Type: application/xml
+    status_code: [200, 201, 202, 204]
+  when: resource_post.status in [409, 500]
+
+# ------------------------------------------------------------------
+# 5. Import roles
+# ------------------------------------------------------------------
+- name: Find all role XML files
+  ansible.builtin.find:
+    paths: "{{ project_dir }}/midpoint/roles"
+    patterns: "*.xml"
+  register: role_files
+
+- name: Patch resource OID in all role files
+  ansible.builtin.replace:
+    path: "{{ item.path }}"
+    regexp: "{{ old_resource_oid_in_roles }}"
+    replace: "{{ resource_oid }}"
+  loop: "{{ role_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Read role files from remote
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ role_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  register: role_contents
+
+- name: Import roles into MidPoint (POST, ignore 409 = already exists)
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/roles"
+    method: POST
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    body: "{{ item.content | b64decode }}"
+    headers:
+      Content-Type: application/xml
+    status_code: [200, 201, 202, 204, 409, 500]
+  loop: "{{ role_contents.results }}"
+  loop_control:
+    label: "{{ item.item.path | basename }}"
+  register: role_import_results
+
+- name: PUT roles that already exist (409 → upsert)
+  ansible.builtin.uri:
+    url: >-
+      {{ midpoint_url }}/ws/rest/roles/{{
+        item.item.content | b64decode | regex_search('oid="([^"]+)"', '\1') | first
+      }}
+    method: PUT
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    body: "{{ item.item.content | b64decode }}"
+    headers:
+      Content-Type: application/xml
+    status_code: [200, 201, 202, 204]
+  loop: "{{ role_import_results.results }}"
+  loop_control:
+    label: "{{ item.item.item.path | basename }}"
+  when: item.status in [409, 500]

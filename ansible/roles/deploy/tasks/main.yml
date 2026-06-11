@@ -1,0 +1,61 @@
+---
+# Sync project, write .env.docker with server IP, build images, bring up services
+
+- name: Create project directory
+  ansible.builtin.file:
+    path: "{{ project_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+  become: true
+
+- name: Sync project files to server (excluding venv, __pycache__, build artefacts)
+  ansible.posix.synchronize:
+    src: "{{ project_repo_src }}/"
+    dest: "{{ project_dir }}/"
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=__pycache__"
+      - "--exclude=*.pyc"
+      - "--exclude=.venv"
+      - "--exclude=venv"
+      - "--exclude=midpoint-connector/build"
+      - "--exclude=midpoint-connector/.gradle"
+      - "--exclude=dumps"
+      - "--exclude=ansible"
+    delete: false
+    recursive: true
+
+- name: Make gradlew executable
+  ansible.builtin.file:
+    path: "{{ project_dir }}/midpoint-connector/gradlew"
+    mode: "0755"
+
+- name: Write .env.docker with correct server IP and optional SMTP credentials
+  ansible.builtin.template:
+    src: env.docker.j2
+    dest: "{{ project_dir }}/.env.docker"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: Determine compose profiles
+  ansible.builtin.set_fact:
+    compose_profiles: >-
+      {{ '--profile midpoint' if with_midpoint | bool else '' }}
+      {{ '--profile targets' if with_targets | bool else '' }}
+
+- name: Pull / build Docker images
+  ansible.builtin.command:
+    cmd: docker compose {{ compose_profiles }} build --pull
+    chdir: "{{ project_dir }}"
+  register: compose_build
+  changed_when: "'Successfully built' in compose_build.stdout or compose_build.rc == 0"
+
+- name: Start all services
+  ansible.builtin.command:
+    cmd: docker compose {{ compose_profiles }} up -d --remove-orphans
+    chdir: "{{ project_dir }}"
+  register: compose_up
+  changed_when: compose_up.rc == 0

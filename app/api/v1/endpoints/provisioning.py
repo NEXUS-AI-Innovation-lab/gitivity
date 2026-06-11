@@ -210,10 +210,11 @@ async def receive_approval_callback(
     request: ApprovalCallbackRequest,
     db: Prisma = Depends(get_db),
 ) -> ApprovalCallbackResponse:
-    """Receive approval decision callback from n8n workflow.
+    """Receive a manual approval decision (compat/scripted path).
 
-    Called by n8n after all approvers have responded (approve/reject).
-    The n8n workflow is the "worker_id" in this context.
+    The normal flow goes through the email approval chain
+    (GET /api/v1/approvals/decision). This endpoint allows approving or
+    rejecting an operation directly, e.g. from tests or scripts.
 
     Args:
         operation_id: The operation being approved/rejected
@@ -233,6 +234,15 @@ async def receive_approval_callback(
             reason=request.reason,
             worker_id=request.worker_id,
         )
+
+        # Clean up any active email approval chain for this operation
+        redis_client = await RedisClient.get_client()
+        approval_repo = ApprovalRedisRepository(redis_client)
+        chain = await approval_repo.get_chain(operation_id)
+        if chain:
+            if chain.get("active_token"):
+                await approval_repo.delete_decision_token(chain["active_token"])
+            await approval_repo.delete_chain(operation_id)
 
         return ApprovalCallbackResponse(
             status="success",

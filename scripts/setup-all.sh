@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full from-scratch setup script for Gateway IAM.
-# Starts all Docker services, waits for readiness, imports n8n workflow,
+# Starts all Docker services, waits for readiness,
 # builds and deploys the MidPoint connector, imports resource + roles.
 #
 # Usage:
@@ -9,7 +9,6 @@
 # Options:
 #   --skip-build      Skip Gradle connector build
 #   --skip-midpoint   Skip MidPoint setup entirely
-#   --skip-n8n        Skip n8n workflow import
 #   --targets         Also start target services (LDAP, MySQL, PostgreSQL, Odoo)
 #   --help, -h        Show this help
 set -euo pipefail
@@ -27,11 +26,6 @@ COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 # Gateway services
 GATEWAY_API_URL="http://localhost:8100"
 GATEWAY_HTTP_URL="http://localhost:5100"
-
-# n8n
-N8N_URL="http://localhost:5678"
-N8N_CONTAINER="gitivity-n8n"
-N8N_WORKFLOW_FILE="$PROJECT_ROOT/n8n/workflows/approval-workflow.json"
 
 # MidPoint
 MIDPOINT_URL="http://localhost:8080/midpoint"
@@ -56,7 +50,6 @@ WAIT_INTERVAL=10
 # Flags
 SKIP_BUILD=false
 SKIP_MIDPOINT=false
-SKIP_N8N=false
 WITH_TARGETS=false
 
 TEMP_DIR=""
@@ -98,14 +91,12 @@ Usage: $(basename "$0") [OPTIONS]
 Full from-scratch setup for Gateway IAM:
   1. Start all Docker services (default profile + midpoint profile)
   2. Wait for every service to be ready
-  3. Import n8n approval workflow
-  4. Build & deploy MidPoint connector JAR
-  5. Import MidPoint resource + 10 roles
+  3. Build & deploy MidPoint connector JAR
+  4. Import MidPoint resource + 10 roles
 
 Options:
   --skip-build      Skip Gradle connector build (JAR must already exist)
   --skip-midpoint   Skip MidPoint connector + resource + role setup
-  --skip-n8n        Skip n8n workflow import
   --targets         Also start target services (LDAP, MySQL, PostgreSQL, Odoo)
   --help, -h        Show this help
 
@@ -113,8 +104,8 @@ Prerequisites:
   - Docker running
   - jq  (brew install jq / apt install jq)
   - Java 11+  (unless --skip-build)
-  - Optional: set GMAIL_USER and GMAIL_APP_PASSWORD in your environment
-              for email notifications via n8n
+  - Optional: set SMTP_USER / SMTP_PASSWORD in .env.docker for approval
+              emails (or set APPROVAL_MODE=auto for testing without SMTP)
 
 EOF
 }
@@ -127,7 +118,6 @@ parse_args() {
         case "$1" in
             --skip-build)    SKIP_BUILD=true ;;
             --skip-midpoint) SKIP_MIDPOINT=true ;;
-            --skip-n8n)      SKIP_N8N=true ;;
             --targets)       WITH_TARGETS=true ;;
             --help|-h)       usage; exit 0 ;;
             *) log_error "Unknown argument: $1"; usage; exit 1 ;;
@@ -162,7 +152,6 @@ check_prerequisites() {
     fi
 
     [[ -f "$COMPOSE_FILE" ]]       || die "docker-compose.yml not found at $COMPOSE_FILE"
-    [[ -f "$N8N_WORKFLOW_FILE" ]]  || die "n8n workflow not found at $N8N_WORKFLOW_FILE"
     [[ -f "$RESOURCE_XML" ]]       || die "Resource XML not found at $RESOURCE_XML"
     [[ -d "$ROLES_DIR" ]]          || die "Roles directory not found at $ROLES_DIR"
 
@@ -237,7 +226,6 @@ wait_for_services() {
     wait_for_http "RabbitMQ Management"   "http://localhost:15672"            "200"
     wait_for_http "Gateway HTTP"          "$GATEWAY_HTTP_URL/health"          "200"
     wait_for_http "Gateway API"           "$GATEWAY_API_URL/health"           "200"
-    wait_for_http "n8n"                   "$N8N_URL/healthz"                  "200"
 
     if [[ "$SKIP_MIDPOINT" == false ]]; then
         wait_for_http "MidPoint" "$MIDPOINT_URL/ws/rest/self" "200" "$MIDPOINT_USER:$MIDPOINT_PASS"
@@ -262,60 +250,6 @@ wait_for_services() {
         else
             log_warn "Connector framework not yet initialized — continuing anyway"
         fi
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Import n8n workflow
-# ---------------------------------------------------------------------------
-import_n8n_workflow() {
-    log_step "Import n8n workflow"
-
-    if [[ "$SKIP_N8N" == true ]]; then
-        log_warn "Skipping n8n workflow import (--skip-n8n)"
-        return 0
-    fi
-
-    # Copy workflow JSON into container
-    log_info "Copying workflow file into container $N8N_CONTAINER..."
-    docker cp "$N8N_WORKFLOW_FILE" "$N8N_CONTAINER:/tmp/approval-workflow.json" \
-        || die "docker cp failed for n8n workflow"
-
-    # Import via n8n CLI
-    log_info "Running: n8n import:workflow..."
-    local output
-    output=$(docker exec "$N8N_CONTAINER" \
-        n8n import:workflow --input=/tmp/approval-workflow.json 2>&1) || true
-
-    if echo "$output" | grep -qi "error\|failed"; then
-        log_warn "n8n import output: $output"
-        log_warn "Workflow may already exist or had a non-fatal issue."
-    else
-        log_success "n8n workflow imported"
-        log_info "$output"
-    fi
-
-    # Activate the workflow via n8n API
-    log_info "Activating workflow..."
-    local api_key=""
-
-    # Try to get/create an API key from n8n
-    local workflow_id
-    workflow_id=$(curl -s \
-        --user "admin:admin" \
-        -H "Accept: application/json" \
-        "$N8N_URL/api/v1/workflows" 2>/dev/null \
-        | jq -r '.data[0].id // empty' 2>/dev/null || echo "")
-
-    if [[ -n "$workflow_id" ]]; then
-        curl -s -X PATCH \
-            --user "admin:admin" \
-            -H "Content-Type: application/json" \
-            -d '{"active": true}' \
-            "$N8N_URL/api/v1/workflows/$workflow_id" >/dev/null 2>&1 || true
-        log_success "Workflow activated (id: $workflow_id)"
-    else
-        log_warn "Could not auto-activate workflow. Activate manually at $N8N_URL"
     fi
 }
 
@@ -548,7 +482,6 @@ print_summary() {
     echo "    Gateway API     →  http://localhost:8100"
     echo "    Gateway HTTP    →  http://localhost:5100"
     echo "    RabbitMQ UI     →  http://localhost:15672   (guest / guest)"
-    echo "    n8n             →  http://localhost:5678    (admin / admin)"
     if [[ "$SKIP_MIDPOINT" == false ]]; then
         echo "    MidPoint        →  http://localhost:8080/midpoint  ($MIDPOINT_USER / $MIDPOINT_PASS)"
     fi
@@ -560,12 +493,10 @@ print_summary() {
         echo "    PostgreSQL      →  localhost:5433"
         echo "    Odoo            →  http://localhost:8069"
     fi
-    if [[ -z "${GMAIL_USER:-}" ]]; then
-        echo ""
-        echo "  ${YELLOW}${BOLD}Note:${RESET} GMAIL_USER / GMAIL_APP_PASSWORD not set."
-        echo "    n8n email notifications are disabled."
-        echo "    Set them and re-run to enable: export GMAIL_USER=you@gmail.com"
-    fi
+    echo ""
+    echo "  ${YELLOW}${BOLD}Note:${RESET} approval emails require SMTP_USER / SMTP_PASSWORD"
+    echo "    in .env.docker (Gmail app password). For testing without SMTP,"
+    echo "    set APPROVAL_MODE=auto in .env.docker."
     echo ""
 }
 
@@ -586,7 +517,6 @@ main() {
     check_prerequisites
     start_services
     wait_for_services
-    import_n8n_workflow
     if [[ "$SKIP_MIDPOINT" == false ]]; then
         build_connector
         deploy_connector

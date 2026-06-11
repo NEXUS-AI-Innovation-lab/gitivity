@@ -20,7 +20,6 @@ JAR_PATH="$CONNECTOR_DIR/build/libs/$JAR_NAME"
 ICF_CONNECTORS_PATH="/opt/midpoint/var/icf-connectors/"
 
 RESOURCE_XML="$PROJECT_ROOT/midpoint/ressource.xml"
-ROLES_DIR="$PROJECT_ROOT/midpoint/roles"
 
 CONNECTOR_BUNDLE="lu.lns.connector.restgateway"
 CONNECTOR_VERSION="1.2.0-SNAPSHOT"
@@ -31,9 +30,6 @@ OLD_CONNECTOR_OID="84505b3d-5f90-4617-a160-6548be000a44"
 
 # Stable OID declared in ressource.xml itself.
 RESOURCE_OID="736ea741-2c73-4478-b5d1-07d84cdf860f"
-
-# Wrong resourceRef OID present in the gateway-shadowref role files.
-OLD_RESOURCE_OID_IN_ROLES="3447776b-105c-4663-a025-5b27568ee091"
 
 WAIT_TIMEOUT=300
 WAIT_INTERVAL=10
@@ -80,8 +76,8 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Bootstraps a fresh MidPoint instance with the Gateway IAM connector,
-resource, and roles.
+Bootstraps a fresh MidPoint instance with the Gateway IAM connector
+and resource.
 
 Options:
   --skip-build    Skip Gradle build (JAR must already exist at $JAR_PATH)
@@ -89,10 +85,10 @@ Options:
   --help, -h      Show this help
 
 Prerequisites:
-  - Docker running with the MidPoint profile active:
+  - curl, jq, Java 17+, and Docker are installed automatically if missing.
+  - Supported package managers: Homebrew (macOS), apt, dnf/yum, pacman, zypper.
+  - After auto-install, Docker must be running with the MidPoint profile:
       docker compose --profile midpoint up -d
-  - jq installed (brew install jq  /  apt install jq)
-  - Java 11+ in PATH (unless --skip-build)
 
 EOF
 }
@@ -110,6 +106,228 @@ parse_args() {
         esac
         shift
     done
+}
+
+# ---------------------------------------------------------------------------
+# Detect OS and package manager
+# ---------------------------------------------------------------------------
+detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    elif [[ -f /etc/os-release ]]; then
+        # shellcheck source=/dev/null
+        source /etc/os-release
+        case "$ID" in
+            ubuntu|debian|linuxmint) echo "debian" ;;
+            fedora|rhel|centos|rocky|almalinux) echo "redhat" ;;
+            arch|manjaro) echo "arch" ;;
+            opensuse*|sles) echo "suse" ;;
+            *) echo "unknown" ;;
+        esac
+    else
+        echo "unknown"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Install a single package via the appropriate package manager
+# ---------------------------------------------------------------------------
+pkg_install() {
+    local pkg="$1"
+    local os
+    os=$(detect_os)
+
+    log_info "Installing $pkg (OS: $os)..."
+
+    case "$os" in
+        macos)
+            command -v brew >/dev/null 2>&1 || {
+                log_info "Homebrew not found. Installing Homebrew first..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+                    || die "Homebrew installation failed"
+            }
+            brew install "$pkg" || die "Failed to install $pkg via Homebrew"
+            ;;
+        debian)
+            sudo apt-get update -qq
+            sudo apt-get install -y "$pkg" || die "Failed to install $pkg via apt"
+            ;;
+        redhat)
+            if command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y "$pkg" || die "Failed to install $pkg via dnf"
+            else
+                sudo yum install -y "$pkg" || die "Failed to install $pkg via yum"
+            fi
+            ;;
+        arch)
+            sudo pacman -Sy --noconfirm "$pkg" || die "Failed to install $pkg via pacman"
+            ;;
+        suse)
+            sudo zypper install -y "$pkg" || die "Failed to install $pkg via zypper"
+            ;;
+        *)
+            die "Unsupported OS. Please install $pkg manually."
+            ;;
+    esac
+    log_success "$pkg installed"
+}
+
+# ---------------------------------------------------------------------------
+# Install Java 17 (LTS) if missing
+# ---------------------------------------------------------------------------
+install_java() {
+    local os
+    os=$(detect_os)
+    log_info "Installing Java 17..."
+
+    case "$os" in
+        macos)
+            command -v brew >/dev/null 2>&1 || {
+                log_info "Homebrew not found. Installing Homebrew first..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+                    || die "Homebrew installation failed"
+            }
+            brew install --cask temurin@17 2>/dev/null \
+                || brew install openjdk@17 \
+                || die "Failed to install Java via Homebrew"
+            # Add to PATH for this session if installed via formula
+            local jdk_path
+            jdk_path=$(brew --prefix openjdk@17 2>/dev/null || true)
+            if [[ -d "$jdk_path/bin" ]]; then
+                export PATH="$jdk_path/bin:$PATH"
+            fi
+            ;;
+        debian)
+            sudo apt-get update -qq
+            sudo apt-get install -y openjdk-17-jdk || die "Failed to install OpenJDK 17 via apt"
+            ;;
+        redhat)
+            if command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y java-17-openjdk-devel || die "Failed to install OpenJDK 17 via dnf"
+            else
+                sudo yum install -y java-17-openjdk-devel || die "Failed to install OpenJDK 17 via yum"
+            fi
+            ;;
+        arch)
+            sudo pacman -Sy --noconfirm jdk17-openjdk || die "Failed to install OpenJDK 17 via pacman"
+            ;;
+        suse)
+            sudo zypper install -y java-17-openjdk-devel || die "Failed to install OpenJDK 17 via zypper"
+            ;;
+        *)
+            die "Unsupported OS. Please install Java 17+ manually and ensure it is in PATH."
+            ;;
+    esac
+    log_success "Java installed: $(java -version 2>&1 | head -1)"
+}
+
+# ---------------------------------------------------------------------------
+# Install Docker if missing
+# ---------------------------------------------------------------------------
+install_docker() {
+    local os
+    os=$(detect_os)
+    log_info "Installing Docker..."
+
+    case "$os" in
+        macos)
+            command -v brew >/dev/null 2>&1 || {
+                log_info "Homebrew not found. Installing Homebrew first..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+                    || die "Homebrew installation failed"
+            }
+            brew install --cask docker || die "Failed to install Docker Desktop via Homebrew"
+            log_warn "Docker Desktop installed. Please open it from Applications to start the Docker daemon, then re-run this script."
+            exit 0
+            ;;
+        debian)
+            sudo apt-get update -qq
+            sudo apt-get install -y ca-certificates curl gnupg lsb-release
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+                | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            sudo chmod a+r /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+                | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
+                || die "Failed to install Docker via apt"
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            log_warn "Added $USER to the docker group. You may need to log out and back in."
+            ;;
+        redhat)
+            sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null \
+                || sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
+                || sudo yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
+                || die "Failed to install Docker via dnf/yum"
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            log_warn "Added $USER to the docker group. You may need to log out and back in."
+            ;;
+        arch)
+            sudo pacman -Sy --noconfirm docker docker-compose || die "Failed to install Docker via pacman"
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            log_warn "Added $USER to the docker group. You may need to log out and back in."
+            ;;
+        *)
+            die "Unsupported OS. Please install Docker manually: https://docs.docker.com/get-docker/"
+            ;;
+    esac
+    log_success "Docker installed"
+}
+
+# ---------------------------------------------------------------------------
+# Install prerequisites automatically
+# ---------------------------------------------------------------------------
+install_prerequisites() {
+    log_step "Install prerequisites"
+
+    # curl
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "curl not found — installing..."
+        pkg_install curl
+    else
+        log_success "curl found: $(curl --version | head -1)"
+    fi
+
+    # jq
+    if ! command -v jq >/dev/null 2>&1; then
+        log_warn "jq not found — installing..."
+        pkg_install jq
+    else
+        log_success "jq found: $(jq --version)"
+    fi
+
+    # Docker
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warn "docker not found — installing..."
+        install_docker
+    else
+        log_success "docker found: $(docker --version)"
+    fi
+
+    # Java (only needed when building)
+    if [[ "$SKIP_BUILD" == false ]]; then
+        if ! command -v java >/dev/null 2>&1; then
+            log_warn "java not found — installing Java 17..."
+            install_java
+        else
+            local java_ver
+            java_ver=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}')
+            local major
+            major=$(echo "$java_ver" | awk -F'[._]' '{print ($1 == "1" ? $2 : $1)}')
+            if [[ "$major" -lt 11 ]]; then
+                log_warn "Java $java_ver detected but Java 11+ is required — installing Java 17..."
+                install_java
+            else
+                log_success "java found: $java_ver (major $major)"
+            fi
+        fi
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -149,10 +367,6 @@ check_prerequisites() {
     [[ -f "$RESOURCE_XML" ]] \
         || die "Resource XML not found: $RESOURCE_XML"
     log_success "Resource XML found"
-
-    [[ -d "$ROLES_DIR" ]] \
-        || die "Roles directory not found: $ROLES_DIR"
-    log_success "Roles directory found"
 
     TEMP_DIR=$(mktemp -d)
     log_info "Temp directory: $TEMP_DIR"
@@ -366,88 +580,6 @@ import_resource() {
 }
 
 # ---------------------------------------------------------------------------
-# Import all role XMLs
-# ---------------------------------------------------------------------------
-import_roles() {
-    log_step "Import roles"
-
-    local role_files=(
-        "$ROLES_DIR/role-ldap.xml"
-        "$ROLES_DIR/role-mysql.xml"
-        "$ROLES_DIR/role-postgresql.xml"
-        "$ROLES_DIR/role-odoo.xml"
-        "$ROLES_DIR/role-gateway-mysql-shadowref.xml"
-        "$ROLES_DIR/role-gateway-mysql-shadowref admin.xml"
-        "$ROLES_DIR/role-gateway-postgresql-shadowref.xml"
-        "$ROLES_DIR/role-gateway-postgresql-shadowref admin.xml"
-        "$ROLES_DIR/role-gateway-ldap-shadowref.xml"
-        "$ROLES_DIR/role-gateway-ldap-shadowref admin.xml"
-    )
-
-    local success_count=0
-    local fail_count=0
-
-    for role_file in "${role_files[@]}"; do
-        local role_name
-        role_name=$(basename "$role_file" .xml)
-
-        if [[ ! -f "$role_file" ]]; then
-            log_warn "Role file not found, skipping: $role_file"
-            ((fail_count++)) || true
-            continue
-        fi
-
-        # Patch the wrong resourceRef OID present in the shadowref role files.
-        # The sed is a no-op for files that don't contain the old OID.
-        local temp_role="$TEMP_DIR/${role_name}.xml"
-        sed "s/${OLD_RESOURCE_OID_IN_ROLES}/${RESOURCE_OID}/g" \
-            "$role_file" > "$temp_role"
-
-        local resp_file="$TEMP_DIR/role_resp.txt"
-        local http_code
-        # Extract OID from XML for PUT fallback
-        local role_oid
-        role_oid=$(grep -o 'oid="[^"]*"' "$temp_role" | head -1 | cut -d'"' -f2)
-
-        http_code=$(curl -s -o "$resp_file" -w "%{http_code}" \
-            -X POST \
-            -u "$MIDPOINT_USER:$MIDPOINT_PASS" \
-            -H "Content-Type: application/xml" \
-            --data-binary "@$temp_role" \
-            "$MIDPOINT_URL/ws/rest/roles" 2>/dev/null)
-
-        if [[ "$http_code" =~ ^2 ]]; then
-            log_success "  Imported: $role_name (HTTP $http_code)"
-            ((success_count++)) || true
-        elif [[ -n "$role_oid" ]]; then
-            # Role already exists — update via PUT
-            http_code=$(curl -s -o "$resp_file" -w "%{http_code}" \
-                -X PUT \
-                -u "$MIDPOINT_USER:$MIDPOINT_PASS" \
-                -H "Content-Type: application/xml" \
-                --data-binary "@$temp_role" \
-                "$MIDPOINT_URL/ws/rest/roles/$role_oid" 2>/dev/null)
-            if [[ "$http_code" =~ ^2 ]]; then
-                log_success "  Updated:  $role_name (HTTP $http_code)"
-                ((success_count++)) || true
-            else
-                log_warn "  Failed:   $role_name (HTTP $http_code)"
-                ((fail_count++)) || true
-            fi
-        else
-            log_warn "  Failed:   $role_name (HTTP $http_code)"
-            ((fail_count++)) || true
-        fi
-    done
-
-    echo ""
-    log_info "Roles: ${success_count} imported, ${fail_count} failed"
-    if [[ $fail_count -gt 0 ]]; then
-        log_warn "Some roles failed. Check MidPoint logs: docker logs $MIDPOINT_CONTAINER"
-    fi
-}
-
-# ---------------------------------------------------------------------------
 # Verify the setup
 # ---------------------------------------------------------------------------
 verify_setup() {
@@ -465,31 +597,8 @@ verify_setup() {
         log_warn "Resource not accessible (HTTP $resource_code). Import may have failed."
     fi
 
-    # Spot-check a few role OIDs
-    local sample_oids=(
-        "00000000-0000-0000-0000-000000000103:ldap4"
-        "00000000-0000-0000-0000-000000000101:mysql"
-        "00000000-0000-0000-0000-000000000102:postgresql"
-        "00000000-0000-0000-0000-000000004201:Gateway-odoo"
-    )
-    local verified=0
-    for entry in "${sample_oids[@]}"; do
-        local oid="${entry%%:*}"
-        local name="${entry##*:}"
-        local code
-        code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -u "$MIDPOINT_USER:$MIDPOINT_PASS" \
-            "$MIDPOINT_URL/ws/rest/roles/$oid" 2>/dev/null || echo "000")
-        if [[ "$code" == "200" ]]; then
-            log_success "  Role OK: $name ($oid)"
-            ((verified++)) || true
-        else
-            log_warn "  Role missing (HTTP $code): $name ($oid)"
-        fi
-    done
-
     echo ""
-    if [[ "$resource_code" == "200" && $verified -ge 3 ]]; then
+    if [[ "$resource_code" == "200" ]]; then
         echo "${GREEN}${BOLD}============================================${RESET}"
         echo "${GREEN}${BOLD}  Gateway IAM MidPoint setup complete!${RESET}"
         echo "${GREEN}${BOLD}============================================${RESET}"
@@ -517,13 +626,13 @@ main() {
     echo "${BOLD}${BLUE}======================================${RESET}"
     echo ""
 
+    install_prerequisites
     check_prerequisites
     build_connector
     deploy_connector
     wait_for_midpoint
     discover_connector_oid
     import_resource
-    import_roles
     verify_setup
 
     local elapsed=$((SECONDS - start_time))

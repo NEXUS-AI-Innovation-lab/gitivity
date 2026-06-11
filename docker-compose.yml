@@ -73,6 +73,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+    image: gitivity-gateway:latest
     container_name: gitivity-api
     env_file: .env.docker
     ports:
@@ -97,9 +98,7 @@ services:
 
   # Gateway Consumer - RabbitMQ message consumer (same image, different entrypoint)
   gateway-consumer:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.api
+    image: gitivity-gateway:latest
     container_name: gitivity-consumer
     env_file: .env.docker
     command: ["consumer"]
@@ -134,71 +133,6 @@ services:
       - "5100:5100"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5100/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - gateway-network
-
-  # Approval Worker - Flask approval workflow simulator
-  approval-worker:
-    build:
-      context: ./approval_worker
-      dockerfile: Dockerfile
-    container_name: gitivity-approval-worker
-    environment:
-      GATEWAY_CALLBACK_URL: http://gateway-api:8100
-      SLEEP_DURATION: 5
-      WORKER_ID: flask-approval-worker-1
-      WORKER_PORT: 5101
-      LOG_LEVEL: INFO
-    ports:
-      - "5101:5101"
-    depends_on:
-      gateway-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5101/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - gateway-network
-
-  # n8n - Approval workflow automation
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: gitivity-n8n
-    environment:
-      N8N_HOST: 0.0.0.0
-      N8N_PORT: 5678
-      N8N_PROTOCOL: http
-      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
-      GENERIC_TIMEZONE: Europe/Paris
-      TZ: Europe/Paris
-      DB_TYPE: sqlite
-      DB_SQLITE_DATABASE: /home/node/.n8n/database.sqlite
-      N8N_BASIC_AUTH_ACTIVE: "true"
-      N8N_BASIC_AUTH_USER: admin
-      N8N_BASIC_AUTH_PASSWORD: admin
-      N8N_SECURE_COOKIE: "false"
-      EXECUTIONS_DATA_PRUNE: "true"
-      EXECUTIONS_DATA_MAX_AGE: 168
-      N8N_PAYLOAD_SIZE_MAX: 16
-      # Gmail SMTP (set in host .env or override)
-      N8N_EMAIL_MODE: smtp
-      N8N_SMTP_HOST: smtp.gmail.com
-      N8N_SMTP_PORT: 587
-      N8N_SMTP_USER: ${GMAIL_USER:-}
-      N8N_SMTP_PASS: ${GMAIL_APP_PASSWORD:-}
-      N8N_SMTP_SSL: "false"
-      N8N_SMTP_STARTTLS: "true"
-    ports:
-      - "5678:5678"
-    volumes:
-      - n8n_data:/home/node/.n8n
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:5678/healthz || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -378,41 +312,10 @@ services:
     profiles:
       - midpoint
 
-  # =============================================================================
-  # TESTING (docker compose --profile testing up)
-  # =============================================================================
-
-  # Mock n8n for automated testing
-  n8n-mock:
-    build:
-      context: ./docker/mock-n8n
-      dockerfile: Dockerfile
-    container_name: gitivity-n8n-mock
-    environment:
-      MOCK_MODE: auto-approve
-      MOCK_DELAY_MS: 0
-      MOCK_REJECT_RATE: 0.3
-      N8N_SMTP_HOST: smtp.gmail.com
-      N8N_SMTP_PORT: 465
-      N8N_SMTP_USER: ${GMAIL_USER:-}
-      N8N_SMTP_PASS: ${GMAIL_APP_PASSWORD:-}
-    ports:
-      - "8101:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - gateway-network
-    profiles:
-      - testing
-
 volumes:
   postgres_data:
   rabbitmq_data:
   redis_data:
-  n8n_data:
   mysql_target_data:
   postgresql_target_data:
   odoo_db_data:

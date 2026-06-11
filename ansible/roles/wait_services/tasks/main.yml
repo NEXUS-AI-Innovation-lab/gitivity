@@ -1,0 +1,66 @@
+---
+# Wait for all core services to be healthy before proceeding
+
+- name: Wait for RabbitMQ management UI
+  ansible.builtin.uri:
+    url: "http://localhost:15672"
+    method: GET
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+
+- name: Wait for Gateway HTTP (entitlements)
+  ansible.builtin.uri:
+    url: "http://localhost:5100/health"
+    method: GET
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+
+- name: Wait for Gateway API
+  ansible.builtin.uri:
+    url: "http://localhost:8100/health"
+    method: GET
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+
+- name: Wait for MidPoint REST API
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/self"
+    method: GET
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+  when: with_midpoint | bool
+
+- name: Wait for MidPoint connector framework to scan ICF connectors
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/connectors"
+    method: GET
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    return_content: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: connectors_resp
+  until: >
+    ((connectors_resp.content | default("{}") | from_json).object.object | default([]) | length > 0) or
+    ((connectors_resp.content | default("{}") | from_json).object | default([]) | length > 0)
+  retries: "{{ (midpoint_connector_wait_timeout | int) // 10 }}"
+  delay: 10
+  when: with_midpoint | bool
+  ignore_errors: true

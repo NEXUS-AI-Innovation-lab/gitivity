@@ -174,6 +174,85 @@ class ApprovalRedisRepository:
             logger.error(f"Failed to get pending count: {e}")
             return 0
 
+    # --- Approval chain (multi-level email approval) ---
+
+    async def store_chain(self, operation_id: str, chain_data: dict) -> bool:
+        """Store the approval chain state (approvers, current level, context).
+
+        Args:
+            operation_id: Operation ID
+            chain_data: Chain state dict (approvers, current_index, user_data, ...)
+
+        Returns:
+            True if stored successfully
+        """
+        try:
+            key = f"approval:chain:{operation_id}"
+            result = await self.redis.setex(key, self.ttl, json.dumps(chain_data))
+            logger.info(f"Stored approval chain: {operation_id} (TTL: {self.ttl}s)")
+            return bool(result)
+        except Exception as e:
+            logger.error(f"Failed to store approval chain: {e}")
+            return False
+
+    async def get_chain(self, operation_id: str) -> Optional[dict]:
+        """Get the approval chain state."""
+        try:
+            value = await self.redis.get(f"approval:chain:{operation_id}")
+            return json.loads(value) if value else None
+        except Exception as e:
+            logger.error(f"Failed to get approval chain: {e}")
+            return None
+
+    async def delete_chain(self, operation_id: str) -> bool:
+        """Delete the approval chain after a terminal decision."""
+        try:
+            result = await self.redis.delete(f"approval:chain:{operation_id}")
+            return result > 0
+        except Exception as e:
+            logger.error(f"Failed to delete approval chain: {e}")
+            return False
+
+    async def store_decision_token(self, token: str, token_data: dict) -> bool:
+        """Store a single-use decision token for an approver.
+
+        Args:
+            token: Unguessable token embedded in the email links
+            token_data: {operation_id, approver_email, approver_name, level, level_index}
+
+        Returns:
+            True if stored successfully
+        """
+        try:
+            key = f"approval:token:{token}"
+            result = await self.redis.setex(key, self.ttl, json.dumps(token_data))
+            return bool(result)
+        except Exception as e:
+            logger.error(f"Failed to store decision token: {e}")
+            return False
+
+    async def consume_decision_token(self, token: str) -> Optional[dict]:
+        """Atomically consume a decision token (GETDEL).
+
+        A second call with the same token returns None, which enforces
+        single-use semantics.
+        """
+        try:
+            value = await self.redis.getdel(f"approval:token:{token}")
+            return json.loads(value) if value else None
+        except Exception as e:
+            logger.error(f"Failed to consume decision token: {e}")
+            return None
+
+    async def delete_decision_token(self, token: str) -> bool:
+        """Delete a token without consuming it (cleanup on terminal decision)."""
+        try:
+            result = await self.redis.delete(f"approval:token:{token}")
+            return result > 0
+        except Exception as e:
+            logger.error(f"Failed to delete decision token: {e}")
+            return False
+
     # --- Rejected CREATE tracking ---
 
     async def store_rejected_create(
