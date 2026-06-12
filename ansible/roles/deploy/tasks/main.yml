@@ -43,7 +43,7 @@
 - name: Determine compose profiles
   ansible.builtin.set_fact:
     compose_profiles: >-
-      {{ '--profile midpoint' if with_midpoint | bool else '' }}
+      {{ '--profile midpoint' if (with_midpoint | bool and not midpoint_external | bool) else '' }}
       {{ '--profile targets' if with_targets | bool else '' }}
 
 - name: Pull / build Docker images

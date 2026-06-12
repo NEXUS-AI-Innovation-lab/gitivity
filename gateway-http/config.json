@@ -16,15 +16,28 @@
       "password": "",
       "defaultTable": "users"
     },
-    "LDAP": {
-      "host": "localhost",
-      "port": "389",
-      "baseDn": "dc=example,dc=com",
-      "bindDn": "cn=admin,dc=example,dc=com",
-      "password": "admin",
-      "defaultOU": "ou=Users,dc=example,dc=com",
-      "groupsBaseDn": "ou=Groups,dc=example,dc=com"
-    }
+    "LDAP": [
+      {
+        "name": "domain1",
+        "host": "localhost",
+        "port": "389",
+        "baseDn": "dc=example,dc=com",
+        "bindDn": "cn=admin,dc=example,dc=com",
+        "password": "admin",
+        "defaultOU": "ou=Users,dc=example,dc=com",
+        "groupsBaseDn": "ou=Groups,dc=example,dc=com"
+      },
+      {
+        "name": "domain2",
+        "host": "localhost",
+        "port": "390",
+        "baseDn": "dc=other,dc=com",
+        "bindDn": "cn=admin,dc=other,dc=com",
+        "password": "admin",
+        "defaultOU": "ou=Users,dc=other,dc=com",
+        "groupsBaseDn": "ou=Groups,dc=other,dc=com"
+      }
+    ]
   },
   "entitlements": {
     "postgresql": {

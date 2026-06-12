@@ -11,6 +11,14 @@
 #     [-e "with_midpoint=false"] \
 #     [-e "skip_build=true"]
 #
+# MidPoint EXISTANT (non géré par ce playbook, expose <ip>:<port>) :
+#   ansible-playbook site.yml -e "server_ip=<IP_GATEWAY>" \
+#     -e "midpoint_external=true" \
+#     -e "midpoint_host=<IP_MIDPOINT>" -e "midpoint_port=<PORT>" \
+#     -e "midpoint_admin_user=administrator" -e "midpoint_admin_password=<MDP>" \
+#     [-e "midpoint_manage_container=true" -e "midpoint_container=<nom>"]  # si MidPoint
+#     # tourne en Docker SUR le même hôte → déploiement auto du JAR conservé
+#
 # The PEM key is expected at ~/Downloads/ansible.pem (see inventory/hosts.yml).
 # =============================================================================
 
@@ -48,6 +56,6 @@
           ║  Gateway API      →  http://{{ server_ip }}:8100
           ║  Gateway HTTP     →  http://{{ server_ip }}:5100
           ║  RabbitMQ UI      →  http://{{ server_ip }}:15672  (guest/guest)
-          ║  MidPoint         →  http://{{ server_ip }}:8080/midpoint
-          ║                       (administrator / Test5ecr3t)
+          ║  MidPoint         →  http://{{ midpoint_host if midpoint_external | bool else server_ip }}:{{ midpoint_port }}/midpoint
+          ║                       ({{ midpoint_admin_user }} / {{ midpoint_admin_password }})
           ╚══════════════════════════════════════════════════════════╝

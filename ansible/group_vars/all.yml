@@ -24,8 +24,30 @@ approval_mode: email   # email | auto
 # --- MidPoint -----------------------------------------------------------------
 midpoint_admin_user: administrator
 midpoint_admin_password: Test5ecr3t
-# localhost: the REST/health tasks run ON the target host (AWS blocks hairpin to own public IP)
-midpoint_url: "http://localhost:8080/midpoint"
+
+# External MidPoint mode: configure an EXISTING MidPoint instance instead of
+# starting one in docker-compose. The REST steps (resource + roles import,
+# connector OID discovery) work against any reachable <ip>:<port>.
+#   ansible-playbook site.yml -e midpoint_external=true \
+#     -e midpoint_host=10.0.0.5 -e midpoint_port=8080 \
+#     -e midpoint_admin_password=<password>
+midpoint_external: false
+midpoint_host: localhost     # external mode: IP/hostname of the existing MidPoint
+midpoint_port: 8080
+# localhost when local: the REST/health tasks run ON the target host
+# (AWS blocks hairpin to own public IP)
+midpoint_url: "http://{{ midpoint_host }}:{{ midpoint_port }}/midpoint"
+
+# Docker container holding MidPoint. With an external instance running in
+# Docker ON THE SAME HOST, override midpoint_container and force
+# midpoint_manage_container=true to keep automatic JAR deploy + restart.
+# With a remote/non-Docker instance the JAR deploy is skipped: install
+# build/libs/{{ jar_name }} into <midpoint-home>/var/icf-connectors/ manually.
+midpoint_container: gitivity-midpoint
+midpoint_manage_container: "{{ not (midpoint_external | bool) }}"
+
+# URL used by the gateway containers (MidPoint role rollback on rejection)
+midpoint_gateway_url: "{{ midpoint_url if (midpoint_external | bool) else 'http://gitivity-midpoint:8080/midpoint' }}"
 
 # Bundle name comes from the gradle project name (settings.gradle)
 connector_bundle: GateWay-IAM

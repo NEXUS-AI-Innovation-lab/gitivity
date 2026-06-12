@@ -24,22 +24,37 @@ def load_config():
         return {}
 
 def get_ldap_groups():
-    """Récupère les groupes LDAP depuis le serveur LDAP"""
+    """Récupère les groupes LDAP depuis tous les serveurs LDAP configurés.
+
+    config.json -> configs.LDAP est une liste de serveurs, chacun avec un 'name'
+    (domaine). Le cn de chaque groupe est préfixé par le nom du domaine
+    (ex: domain1.Admins) pour distinguer les serveurs.
+    """
     config = load_config()
-    ldap_config = config.get('configs', {}).get('LDAP', {})
+    ldap_servers = config.get('configs', {}).get('LDAP', [])
+
+    # Rétrocompat : si LDAP est encore un seul objet, on l'enveloppe dans une liste
+    if isinstance(ldap_servers, dict):
+        ldap_servers = [ldap_servers]
+
+    all_groups = []
+    for ldap_config in ldap_servers:
+        all_groups.extend(_fetch_ldap_groups_for_server(ldap_config))
+    return all_groups
+
+
+def _fetch_ldap_groups_for_server(ldap_config):
+    """Récupère les groupes d'un seul serveur LDAP, préfixés par son name."""
+    domain = ldap_config.get('name', 'default')
 
     if not ldap_config.get('host'):
         return []
 
     try:
         import ldap3
-        ldap_host = os.environ.get('LDAP_HOST', ldap_config.get('host', 'localhost'))
-        ldap_port = int(os.environ.get('LDAP_PORT', ldap_config.get('port', 389)))
-        server = ldap3.Server(
-            ldap_host,
-            port=ldap_port,
-            get_info=ldap3.ALL
-        )
+        ldap_host = ldap_config.get('host', 'localhost')
+        ldap_port = int(ldap_config.get('port', 389))
+        server = ldap3.Server(ldap_host, port=ldap_port, get_info=ldap3.ALL)
         conn = ldap3.Connection(
             server,
             user=ldap_config.get('bindDn'),
@@ -56,9 +71,10 @@ def get_ldap_groups():
 
         groups = []
         for entry in conn.entries:
+            cn = str(entry.cn) if hasattr(entry, 'cn') else ''
             groups.append({
                 'dn': str(entry.entry_dn),
-                'cn': str(entry.cn) if hasattr(entry, 'cn') else '',
+                'cn': f"{domain}.{cn}",
                 'description': str(entry.description) if hasattr(entry, 'description') else ''
             })
 
@@ -67,18 +83,19 @@ def get_ldap_groups():
 
     except ImportError:
         print("Module ldap3 non installé - retour groupes de test")
-        return [
-            {'dn': 'cn=Admins,ou=Groups,dc=openmicroscopy,dc=org', 'cn': 'Admins', 'description': 'Groupe Administrateurs'},
-            {'dn': 'cn=Users,ou=Groups,dc=openmicroscopy,dc=org', 'cn': 'Users', 'description': 'Groupe Utilisateurs'},
-            {'dn': 'cn=Developers,ou=Groups,dc=openmicroscopy,dc=org', 'cn': 'Developers', 'description': 'Groupe Développeurs'}
-        ]
+        return _test_groups(domain)
     except Exception as e:
-        print(f"Erreur LDAP: {e}")
-        return [
-            {'dn': 'cn=Admins,ou=Groups,dc=openmicroscopy,dc=org', 'cn': 'Admins', 'description': 'Groupe Administrateurs'},
-            {'dn': 'cn=Users,ou=Groups,dc=openmicroscopy,dc=org', 'cn': 'Users', 'description': 'Groupe Utilisateurs'},
-            {'dn': 'cn=Developers,ou=Groups,dc=openmicroscopy,dc=org', 'cn': 'Developers', 'description': 'Groupe Développeurs'}
-        ]
+        print(f"Erreur LDAP ({domain}): {e}")
+        return _test_groups(domain)
+
+
+def _test_groups(domain):
+    """Groupes de test (fallback) pour un domaine donné."""
+    return [
+        {'dn': f'cn=Admins,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Admins', 'description': 'Groupe Administrateurs'},
+        {'dn': f'cn=Users,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Users', 'description': 'Groupe Utilisateurs'},
+        {'dn': f'cn=Developers,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Developers', 'description': 'Groupe Développeurs'}
+    ]
 
 def print_separator():
     print("=" * 60)

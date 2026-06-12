@@ -309,12 +309,14 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
 
     @Override
     public FilterTranslator<String> createFilterTranslator(ObjectClass objectClass, OperationOptions options) {
-        LOG.debug("createFilterTranslator called - returning UID-based translator");
+        LOG.debug("createFilterTranslator called - returning UID/NAME-based translator");
         return new AbstractFilterTranslator<String>() {
             @Override
             protected String createEqualsExpression(org.identityconnectors.framework.common.objects.filter.EqualsFilter filter, boolean not) {
-                if (!not && filter.getAttribute().is(Uid.NAME)) {
-                    // Retourner l'UID pour le rechercher
+                // __NAME__ aussi : les associations MidPoint (associationTargetSearch)
+                // filtrent par icfs:name ; sans cette traduction le connecteur
+                // renverrait TOUS les entitlements au lieu du seul profil cherché.
+                if (!not && (filter.getAttribute().is(Uid.NAME) || filter.getAttribute().is(Name.NAME))) {
                     return AttributeUtil.getStringValue(filter.getAttribute());
                 }
                 return null;
@@ -344,8 +346,8 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
                 String cn = (String) group.get("cn");
                 String description = (String) group.get("description");
 
-                // Si on a un query (UID), filtrer
-                if (query != null && !query.isEmpty() && !query.equals(dn)) {
+                // Si on a un query (UID=dn ou NAME=cn), filtrer
+                if (query != null && !query.isEmpty() && !query.equals(dn) && !query.equals(cn)) {
                     continue;
                 }
 

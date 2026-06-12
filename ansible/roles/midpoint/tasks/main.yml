@@ -30,15 +30,26 @@
     cmd: >
       docker cp
       {{ project_dir }}/midpoint-connector/build/libs/{{ jar_name }}
-      gitivity-midpoint:/opt/midpoint/var/icf-connectors/{{ jar_name }}
+      {{ midpoint_container }}:/opt/midpoint/var/icf-connectors/{{ jar_name }}
   register: docker_cp_jar
   changed_when: docker_cp_jar.rc == 0
+  when: midpoint_manage_container | bool
 
 - name: Restart MidPoint to load connector
   ansible.builtin.command:
-    cmd: docker restart gitivity-midpoint
+    cmd: docker restart {{ midpoint_container }}
   register: mp_restart
   changed_when: mp_restart.rc == 0
+  when: midpoint_manage_container | bool
+
+- name: Note manual JAR installation (unmanaged MidPoint)
+  ansible.builtin.debug:
+    msg: >
+      MidPoint container not managed by this playbook. If the connector is not
+      yet installed, copy {{ project_dir }}/midpoint-connector/build/libs/{{ jar_name }}
+      into <midpoint-home>/var/icf-connectors/ on {{ midpoint_host }} and restart
+      MidPoint, then re-run this playbook.
+  when: not midpoint_manage_container | bool
 
 - name: Wait for MidPoint to come back after restart
   ansible.builtin.uri:
