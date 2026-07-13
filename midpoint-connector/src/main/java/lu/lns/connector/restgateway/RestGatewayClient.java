@@ -218,6 +218,20 @@ public class RestGatewayClient {
         }
     }
 
+    /**
+     * Fetch MongoDB roles from the gateway
+     */
+    public List<Map<String, Object>> fetchMongoDbRoles() {
+        try {
+            String response = get("/entitlements/mongodb-roles");
+            Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
+            return GSON.fromJson(response, listType);
+        } catch (Exception e) {
+            LOG.warn("Failed to fetch MongoDB roles: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
     private void handleResponseStatus(int statusCode, String body) {
         if (statusCode >= 200 && statusCode < 300) {
             return; // Success

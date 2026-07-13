@@ -30,7 +30,7 @@ class ProvisioningRepository(BaseRepository[ProvisioningOperation]):
 
         Args:
             operation_type: Type of operation (CREATE_USER, UPDATE_USER, etc.)
-            target_service: Target service (MYSQL, POSTGRESQL, ODOO, LDAP)
+            target_service: Target service (MYSQL, POSTGRESQL, MONGODB, ODOO, LDAP)
             user_data: User data to provision
             original_message: Complete original message from MidPoint
             midpoint_request_id: Optional MidPoint request ID

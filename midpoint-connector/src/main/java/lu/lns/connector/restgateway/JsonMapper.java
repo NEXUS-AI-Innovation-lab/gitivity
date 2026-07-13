@@ -6,6 +6,7 @@ import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.objects.Attribute;
 import org.identityconnectors.framework.common.objects.AttributeDelta;
 import org.identityconnectors.framework.common.objects.Name;
+import org.identityconnectors.framework.common.objects.OperationalAttributes;
 import org.identityconnectors.framework.common.objects.Uid;
 
 import java.time.Instant;
@@ -42,6 +43,9 @@ public class JsonMapper {
         for (Attribute attr : attributes) {
             String name = attr.getName();
             List<Object> values = attr.getValue();
+            String mappedName = OperationalAttributes.PASSWORD_NAME.equals(name)
+                    ? "password"
+                    : name;
 
             // Skip special __UID__ attribute (it's not an attribute to send)
             if (Uid.NAME.equals(name)) {
@@ -56,17 +60,17 @@ public class JsonMapper {
 
             // Handle GuardedString (passwords)
             if (values != null && !values.isEmpty() && values.get(0) instanceof GuardedString) {
-                result.put(name, extractGuardedString((GuardedString) values.get(0)));
+                result.put(mappedName, extractGuardedString((GuardedString) values.get(0)));
                 continue;
             }
 
             // Handle multi-valued attributes
             if (values == null || values.isEmpty()) {
-                result.put(name, null);
+                result.put(mappedName, null);
             } else if (values.size() == 1) {
-                result.put(name, values.get(0));
+                result.put(mappedName, values.get(0));
             } else {
-                result.put(name, values);
+                result.put(mappedName, values);
             }
         }
 
@@ -78,6 +82,9 @@ public class JsonMapper {
 
         for (AttributeDelta delta : deltas) {
             String name = delta.getName();
+            String mappedName = OperationalAttributes.PASSWORD_NAME.equals(name)
+                    ? "password"
+                    : name;
 
             // Skip __UID__ (immutable)
             if (Uid.NAME.equals(name)) {
@@ -98,16 +105,16 @@ public class JsonMapper {
             List<Object> valuesToReplace = delta.getValuesToReplace();
             if (valuesToReplace != null) {
                 if (valuesToReplace.isEmpty()) {
-                    result.put(name, null);
+                    result.put(mappedName, null);
                 } else if (valuesToReplace.size() == 1) {
                     Object value = valuesToReplace.get(0);
                     if (value instanceof GuardedString) {
-                        result.put(name, extractGuardedString((GuardedString) value));
+                        result.put(mappedName, extractGuardedString((GuardedString) value));
                     } else {
-                        result.put(name, value);
+                        result.put(mappedName, value);
                     }
                 } else {
-                    result.put(name, valuesToReplace);
+                    result.put(mappedName, valuesToReplace);
                 }
             } else {
                 // Handle add/remove for multi-valued attributes
@@ -116,19 +123,19 @@ public class JsonMapper {
 
                 // Send added values
                 if (toAdd != null && !toAdd.isEmpty()) {
-                    result.put(name, toAdd.size() == 1 ? toAdd.get(0) : toAdd);
+                    result.put(mappedName, toAdd.size() == 1 ? toAdd.get(0) : toAdd);
                 }
 
                 // Track removed values for specific attributes (roles, ldapGroups)
                 // This allows the gateway to trigger DELETE operations for removed services
                 if (toRemove != null && !toRemove.isEmpty()) {
-                    String removedKey = "removed" + capitalizeFirst(name);
+                    String removedKey = "removed" + capitalizeFirst(mappedName);
                     result.put(removedKey, toRemove.size() == 1 ? toRemove.get(0) : toRemove);
                 }
 
                 // If only removal (no add), also set the attribute to empty
                 if ((toAdd == null || toAdd.isEmpty()) && (toRemove != null && !toRemove.isEmpty())) {
-                    result.put(name, Collections.emptyList());
+                    result.put(mappedName, Collections.emptyList());
                 }
             }
         }

@@ -45,6 +45,22 @@
       "priority": "high"
     }
   },
+  "create_user_mongodb": {
+    "request_id": "mp-req-mongodb-001",
+    "operation_type": "CREATE_USER",
+    "target_service": "MONGODB",
+    "user_data": {
+      "username": "mongo.user",
+      "email": "mongo.user@example.com",
+      "password": "MongoSecureP@ss123!",
+      "roles": ["mongodb"],
+      "attributes": {
+        "mongodbDatabase": "target_db",
+        "mongodbRoles": ["readWrite@target_db"]
+      }
+    },
+    "metadata": {"source": "midpoint"}
+  },
   "create_user_odoo": {
     "request_id": "mp-req-003",
     "operation_type": "CREATE_USER",

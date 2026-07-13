@@ -29,6 +29,9 @@ cryptography  # Required for MySQL 8+ sha2_password authentication
 
 # PostgreSQL (asyncpg already listed above)
 
+# MongoDB
+pymongo>=4.6,<5
+
 # Odoo
 odoorpc
 

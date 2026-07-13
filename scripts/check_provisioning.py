@@ -195,7 +195,7 @@ Examples:
     )
     parser.add_argument(
         "--service",
-        choices=["MYSQL", "POSTGRESQL", "ODOO"],
+        choices=["MYSQL", "POSTGRESQL", "ODOO", "LDAP", "MONGODB"],
         help="Filter by target service",
     )
     parser.add_argument(

@@ -4,6 +4,7 @@ import pytest
 from app.core.connectors.factory import ConnectorFactory, get_connector
 from app.core.connectors.mysql_connector import MySQLConnector, ROLE_TO_PRIVILEGES
 from app.core.connectors.postgresql_connector import PostgreSQLConnector, ROLE_TO_PG_ROLES
+from app.core.connectors.mongodb_connector import MongoDBConnector
 from app.utils.enums import TargetService
 from app.utils.exceptions import ConnectorNotFoundError
 
@@ -21,6 +22,10 @@ class TestConnectorFactory:
         connector = ConnectorFactory.create(TargetService.POSTGRESQL)
         assert isinstance(connector, PostgreSQLConnector)
 
+    def test_create_mongodb_connector(self):
+        connector = ConnectorFactory.create(TargetService.MONGODB)
+        assert isinstance(connector, MongoDBConnector)
+
     def test_create_unsupported_service(self):
         """Test that unsupported service raises error when removed from factory"""
         from app.core.connectors.ldap_connector import LDAPConnector
@@ -37,6 +42,7 @@ class TestConnectorFactory:
         assert TargetService.MYSQL in services
         assert TargetService.POSTGRESQL in services
         assert TargetService.ODOO in services
+        assert TargetService.MONGODB in services
 
     def test_is_service_available(self):
         """Test checking service availability"""
@@ -139,3 +145,35 @@ class TestRoleMappings:
         assert "read" in ROLE_TO_PG_ROLES
         assert "write" in ROLE_TO_PG_ROLES
         assert "admin" in ROLE_TO_PG_ROLES
+
+
+class TestMongoDBConnector:
+    @pytest.fixture
+    def mongodb_connector(self):
+        return MongoDBConnector()
+
+    def test_service_name(self, mongodb_connector):
+        assert mongodb_connector.service_name == TargetService.MONGODB
+
+    def test_normalize_association_uid(self, mongodb_connector):
+        roles = mongodb_connector._normalize_roles(
+            ["mongodb"],
+            {"mongodbRoles": ["readWrite@target_db", "dbAdmin@target_db"]},
+            "target_db",
+        )
+        assert roles == [
+            {"role": "readWrite", "db": "target_db"},
+            {"role": "dbAdmin", "db": "target_db"},
+        ]
+
+    def test_service_marker_is_not_granted(self, mongodb_connector):
+        roles = mongodb_connector._normalize_roles(["mongodb"], {}, "target_db")
+        assert roles == [{"role": "read", "db": "target_db"}]
+
+    def test_roles_are_deduplicated(self, mongodb_connector):
+        roles = mongodb_connector._normalize_roles(
+            None,
+            {"mongodbRoles": ["read@target_db", "read@target_db"]},
+            "target_db",
+        )
+        assert roles == [{"role": "read", "db": "target_db"}]

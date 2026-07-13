@@ -15,6 +15,7 @@ SERVICE_LABELS = {
     "postgresql": "PostgreSQL",
     "ldap": "LDAP",
     "odoo": "Odoo",
+    "mongodb": "MongoDB",
 }
 
 GENERIC_ROLES = {"readonly", "readwrite", "read", "write", "admin", "superuser"}

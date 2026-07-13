@@ -152,6 +152,12 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
         // PostgreSQL grants (comma-separated privileges like "SELECT, INSERT, UPDATE")
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("postgresqlGrants", String.class));
 
+        // MongoDB roles (database-scoped entitlements)
+        AttributeInfoBuilder mongodbRolesBuilder = new AttributeInfoBuilder("mongodbRoles", String.class);
+        mongodbRolesBuilder.setMultiValued(true);
+        userClassBuilder.addAttributeInfo(mongodbRolesBuilder.build());
+        userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("mongodbDatabase", String.class));
+
         // Odoo provisioning control
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("odooCreateUser", Boolean.class));
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("odooCreateEmployee", Boolean.class));
@@ -224,6 +230,15 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
         mysqlProfileClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("grants", String.class));
         mysqlProfileClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("description", String.class));
         schemaBuilder.defineObjectClass(mysqlProfileClassBuilder.build());
+
+        // MongoDbRole ObjectClass (Entitlement)
+        ObjectClassInfoBuilder mongoRoleClassBuilder = new ObjectClassInfoBuilder();
+        mongoRoleClassBuilder.setType("MongoDbRole");
+        mongoRoleClassBuilder.addAttributeInfo(Name.INFO);
+        mongoRoleClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("roleName", String.class));
+        mongoRoleClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("database", String.class));
+        mongoRoleClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("description", String.class));
+        schemaBuilder.defineObjectClass(mongoRoleClassBuilder.build());
 
         Schema schema = schemaBuilder.build();
         LOG.info("Schema built with {} object classes", schema.getObjectClassInfo().size());
@@ -419,6 +434,37 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
                 builder.setName(profileName);
                 builder.addAttribute("profileName", profileName);
                 builder.addAttribute("grants", grants);
+                builder.addAttribute("description", description);
+
+                if (!handler.handle(builder.build())) {
+                    break;
+                }
+            }
+            return;
+        }
+
+        if ("MongoDbRole".equals(objectClassName)) {
+            LOG.info("Fetching MongoDB roles from gateway...");
+            List<Map<String, Object>> roles = getHttpClient().fetchMongoDbRoles();
+            LOG.info("Found {} MongoDB roles", roles.size());
+
+            for (Map<String, Object> role : roles) {
+                String roleName = (String) role.get("roleName");
+                String database = (String) role.get("database");
+                String description = (String) role.get("description");
+                String uid = roleName + "@" + database;
+
+                if (query != null && !query.isEmpty()
+                        && !query.equals(uid) && !query.equals(roleName)) {
+                    continue;
+                }
+
+                ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+                builder.setObjectClass(objectClass);
+                builder.setUid(uid);
+                builder.setName(uid);
+                builder.addAttribute("roleName", roleName);
+                builder.addAttribute("database", database);
                 builder.addAttribute("description", description);
 
                 if (!handler.handle(builder.build())) {

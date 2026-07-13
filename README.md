@@ -1,13 +1,13 @@
 # Gateway IAM
 
-API de provisionnement IAM pour MidPoint. Reçoit des messages via RabbitMQ, coordonne la validation avec n8n, provisionne les utilisateurs vers des services cibles (MySQL, PostgreSQL, Odoo), et gère un système complet de retry et audit.
+API de provisionnement IAM pour MidPoint. Reçoit des messages via RabbitMQ, coordonne la validation, provisionne les utilisateurs vers des services cibles (MySQL, PostgreSQL, MongoDB, LDAP, Odoo), et gère un système complet de retry et audit.
 
 ## Architecture
 
 ```
 MidPoint → RabbitMQ → Gateway IAM → n8n (validation)
                             ↓
-                      Target Service (MySQL/PostgreSQL/Odoo)
+                 Target Service (MySQL/PostgreSQL/MongoDB/LDAP/Odoo)
                             ↓
                       n8n (notification)
                             ↓
@@ -120,7 +120,7 @@ http://localhost:8000/dashboard/connectors
 
 **Connecteurs Gateway** (gérés par cette application) :
 
-- MySQL, PostgreSQL, Odoo, LDAP
+- MySQL, PostgreSQL, MongoDB, Odoo, LDAP
 - Configuration modifiable via l'interface (runtime uniquement)
 - Test de connexion instantané
 
@@ -194,7 +194,12 @@ Voir `.env.example` pour la liste complète.
 
 **operation_type** : `CREATE_USER`, `UPDATE_USER`, `DELETE_USER`, `CREATE_ROLE`, etc.
 
-**target_service** : `MYSQL`, `POSTGRESQL`, `ODOO`
+**target_service** : `MYSQL`, `POSTGRESQL`, `MONGODB`, `ODOO`, `LDAP`
+
+Le guide technique qui retrace toutes les modifications nécessaires à
+l'intégration de MongoDB (Python, RabbitMQ, ConnId, MidPoint, Docker, Ansible et
+tests) est disponible dans
+[docs/MONGODB_PROVISIONING_MANUAL.md](docs/MONGODB_PROVISIONING_MANUAL.md).
 
 ## Tests
 

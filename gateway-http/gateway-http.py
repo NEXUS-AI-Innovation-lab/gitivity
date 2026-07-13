@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Gateway HTTP Simple - Reçoit les opérations de Midpoint via HTTP
-Supporte aussi les entitlements (groupes LDAP, profils PostgreSQL/MySQL)
+Supporte aussi les entitlements (groupes LDAP, profils SQL et rôles MongoDB)
 """
 
 from flask import Flask, request, jsonify
@@ -96,6 +96,51 @@ def _test_groups(domain):
         {'dn': f'cn=Users,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Users', 'description': 'Groupe Utilisateurs'},
         {'dn': f'cn=Developers,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Developers', 'description': 'Groupe Développeurs'}
     ]
+
+
+def get_mongodb_roles():
+    """Discover built-in and custom roles from the configured MongoDB database.
+
+    The static configuration is only a resilience fallback, so MidPoint can
+    still load the resource schema while MongoDB is restarting.
+    """
+    config = load_config()
+    fallback = config.get('entitlements', {}).get('mongodb', {}).get('roles', [])
+    database = os.getenv('MONGODB_DATABASE', 'target_db')
+
+    try:
+        from pymongo import MongoClient
+
+        client = MongoClient(
+            host=os.getenv('MONGODB_HOST', 'localhost'),
+            port=int(os.getenv('MONGODB_PORT', '27017')),
+            username=os.getenv('MONGODB_USER', 'root'),
+            password=os.getenv('MONGODB_PASSWORD', ''),
+            authSource=os.getenv('MONGODB_AUTH_SOURCE', 'admin'),
+            serverSelectionTimeoutMS=5000,
+        )
+        client.admin.command('ping')
+        result = client[database].command({
+            'rolesInfo': 1,
+            'showBuiltinRoles': True,
+            'showPrivileges': False,
+        })
+        roles = []
+        for role in result.get('roles', []):
+            role_name = role.get('role')
+            role_db = role.get('db', database)
+            if not role_name or role_db != database:
+                continue
+            roles.append({
+                'roleName': role_name,
+                'database': role_db,
+                'description': 'Rôle MongoDB intégré' if role.get('isBuiltin') else 'Rôle MongoDB personnalisé',
+            })
+        client.close()
+        return sorted(roles, key=lambda item: item['roleName'].lower()) or fallback
+    except Exception as exc:
+        print(f"MongoDB indisponible pour la découverte des rôles: {exc}")
+        return fallback
 
 def print_separator():
     print("=" * 60)
@@ -242,6 +287,20 @@ def get_entitlements_mysql_profiles():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/entitlements/mongodb-roles', methods=['GET'])
+def get_entitlements_mongodb_roles():
+    """Return roles discoverable on the target MongoDB database."""
+    try:
+        roles = get_mongodb_roles()
+        print_separator()
+        print(f"ENTITLEMENTS MongoDB - {len(roles)} rôles")
+        print_separator()
+        return jsonify(roles), 200
+    except Exception as e:
+        print(f"Erreur: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("Gateway HTTP - Réception opérations Midpoint")
@@ -256,6 +315,7 @@ if __name__ == '__main__':
     print("  - GET /entitlements/ldap-groups         → Groupes LDAP")
     print("  - GET /entitlements/postgresql-profiles → Profils PostgreSQL")
     print("  - GET /entitlements/mysql-profiles      → Profils MySQL")
+    print("  - GET /entitlements/mongodb-roles       → Rôles MongoDB")
     print("=" * 60)
     print("Serveur démarré sur http://localhost:5100")
     print("=" * 60)

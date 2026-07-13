@@ -241,3 +241,28 @@
   loop_control:
     label: "{{ item.item.item.path | basename }}"
   when: item.status in [409, 500]
+
+# ------------------------------------------------------------------
+# 6. Trigger entitlement shadow import
+# ------------------------------------------------------------------
+- name: Start MongoDB entitlement import task
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/resources/{{ resource_oid }}/import/CustomMongoDbRoleObjectClass"
+    method: POST
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    follow_redirects: none
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    status_code: [200, 201, 202, 303]
+  register: mongodb_entitlement_import
+  when: with_targets | bool
+
+- name: Show MongoDB entitlement import task location
+  ansible.builtin.debug:
+    msg: >-
+      MongoDB entitlement import started: {{ mongodb_entitlement_import.location
+      | default('task accepted by MidPoint') }}
+  when: with_targets | bool

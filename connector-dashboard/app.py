@@ -80,6 +80,11 @@ TARGET_SERVICES = {
         "host": os.getenv("LDAP_HOST", "localhost"),
         "port": int(os.getenv("LDAP_PORT", 10389)),
     },
+    "mongodb": {
+        "name": "MongoDB",
+        "host": os.getenv("MONGODB_HOST", "localhost"),
+        "port": int(os.getenv("MONGODB_PORT", 27017)),
+    },
 }
 
 
@@ -117,9 +122,9 @@ def get_midpoint_resources():
 
         # Debug: log the full response structure
         import json
-        print(f"=== MidPoint Response ===")
+        print("=== MidPoint Response ===")
         print(json.dumps(data, indent=2, default=str)[:2000])
-        print(f"=========================")
+        print("=========================")
 
         # Parse MidPoint response - handle nested structure
         def parse_resource(obj):
@@ -432,6 +437,19 @@ def _get_odoo_connection():
     return models, odoo_db, uid, odoo_password
 
 
+def _get_mongodb_connection():
+    """Create an authenticated MongoDB client."""
+    from pymongo import MongoClient
+    return MongoClient(
+        host=os.getenv("MONGODB_HOST", "localhost"),
+        port=int(os.getenv("MONGODB_PORT", 27017)),
+        username=os.getenv("MONGODB_USER", "root"),
+        password=os.getenv("MONGODB_PASSWORD", "mongodb_root_secret"),
+        authSource=os.getenv("MONGODB_AUTH_SOURCE", "admin"),
+        serverSelectionTimeoutMS=5000,
+    )
+
+
 @app.route("/api/users/<service>", methods=["GET"])
 def api_list_users(service):
     """List users for a given target service"""
@@ -534,6 +552,18 @@ def api_list_users(service):
                 })
             return jsonify({"status": "ok", "users": users})
 
+        elif service == "mongodb":
+            client = _get_mongodb_connection()
+            database = os.getenv("MONGODB_DATABASE", "target_db")
+            result = client[database].command({"usersInfo": 1})
+            users = [{
+                "username": user.get("user", ""),
+                "database": user.get("db", database),
+                "roles": [role.get("role") for role in user.get("roles", [])],
+            } for user in result.get("users", [])]
+            client.close()
+            return jsonify({"status": "ok", "users": users})
+
         else:
             return jsonify({"status": "error", "message": f"Unknown service: {service}"}), 400
 
@@ -564,6 +594,7 @@ def api_create_user(service):
         "postgresql": "postgresql",
         "ldap": "ldap",
         "odoo": "odoo",
+        "mongodb": "mongodb",
     }
 
     if service not in service_role_map:
@@ -606,6 +637,12 @@ def api_create_user(service):
                 # roles contains Odoo group xmlids
                 attributes["odooGroups"] = roles
 
+        elif service == "mongodb":
+            database = os.getenv("MONGODB_DATABASE", "target_db")
+            selected_roles = roles or ["read"]
+            attributes["mongodbDatabase"] = database
+            attributes["mongodbRoles"] = [f"{role}@{database}" for role in selected_roles]
+
         # Send CREATE message to RabbitMQ - gateway-iam will handle after approval
         rabbitmq_message = {
             "operation": "CREATE",
@@ -646,6 +683,7 @@ def api_update_user(service, username):
         "postgresql": "postgresql",
         "ldap": "ldap",
         "odoo": "odoo",
+        "mongodb": "mongodb",
     }
 
     if service not in service_role_map:
@@ -687,6 +725,16 @@ def api_update_user(service, username):
             if data.get("odooGroups"):
                 attributes["odooGroups"] = data["odooGroups"]
 
+        elif service == "mongodb":
+            database = os.getenv("MONGODB_DATABASE", "target_db")
+            selected_roles = data.get("mongodbRoles") or data.get("roles")
+            if selected_roles:
+                attributes["mongodbDatabase"] = database
+                attributes["mongodbRoles"] = [
+                    role if "@" in role else f"{role}@{database}"
+                    for role in selected_roles
+                ]
+
         # Send UPDATE message to RabbitMQ - gateway-iam will handle after approval
         rabbitmq_message = {
             "operation": "UPDATE",
@@ -724,6 +772,7 @@ def api_delete_user(service, username):
         "postgresql": "postgresql",
         "ldap": "ldap",
         "odoo": "odoo",
+        "mongodb": "mongodb",
     }
 
     if service not in service_role_map:
@@ -810,6 +859,21 @@ def api_list_roles(service):
                 {"id": "hr.group_hr_user", "name": "RH"},
                 {"id": "hr.group_hr_manager", "name": "Responsable RH"},
             ]})
+
+        elif service == "mongodb":
+            client = _get_mongodb_connection()
+            database = os.getenv("MONGODB_DATABASE", "target_db")
+            result = client[database].command({
+                "rolesInfo": 1,
+                "showBuiltinRoles": True,
+                "showPrivileges": False,
+            })
+            roles = [{
+                "id": role.get("role"),
+                "name": role.get("role"),
+            } for role in result.get("roles", []) if role.get("db") == database]
+            client.close()
+            return jsonify({"status": "ok", "roles": roles})
 
         else:
             return jsonify({"status": "error", "message": f"Unknown service: {service}"}), 400
@@ -1012,7 +1076,7 @@ def api_create_midpoint_user():
                 err_data = response.json()
                 if "error" in err_data:
                     error_msg = err_data.get("error", {}).get("message", error_msg)
-            except:
+            except (TypeError, ValueError):
                 pass
             return jsonify({
                 "status": "error",
@@ -1161,7 +1225,7 @@ def api_assign_midpoint_role(username):
                 error_data = modify_response.json()
                 if "error" in error_data:
                     error_msg = error_data.get("error", {}).get("message", error_msg)
-            except:
+            except (TypeError, ValueError):
                 pass
             return jsonify({
                 "status": "error",

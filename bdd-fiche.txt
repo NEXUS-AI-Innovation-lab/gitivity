@@ -41,7 +41,7 @@ Enums :
                   CREATE_ROLE, UPDATE_ROLE, ASSIGN_ROLE, REVOKE_ROLE
   OperationStatus : PENDING, VALIDATING, VALIDATED, APPROVAL_PENDING,
                     PROCESSING, SUCCESS, FAILED, RETRYING, DLQ
-  TargetService   : MYSQL, POSTGRESQL, ODOO, LDAP
+  TargetService   : MYSQL, POSTGRESQL, MONGODB, ODOO, LDAP
 
 ================================================================================
 2. CACHE — Redis
@@ -63,7 +63,7 @@ user_state:{user}:{svc}      État utilisateur pour diff lors des UPDATE
 3. BASES CIBLES (services provisionnés)
 ================================================================================
 Ces bases sont les destinations finales des opérations de provisionnement.
-Elles sont gérées via les connecteurs (ldap, postgresql, mysql, odoo).
+Elles sont gérées via les connecteurs (ldap, postgresql, mysql, mongodb, odoo).
 
 ---------------------------------------------------------------------------
 LDAP (ApacheDS)
@@ -82,6 +82,14 @@ PostgreSQL (cible)
   Usage     : Base applicative cible. Droits via rôles PostgreSQL :
               readonly -> pg_read_all_data
               readwrite -> pg_read_all_data + pg_write_all_data
+
+MongoDB (cible)
+  Conteneur : mongodb-target (port 27017) — Image : mongo:7.0
+  Base      : target_db (authentification d'administration dans admin)
+  Usage     : Base documentaire cible. Les comptes sont de vrais utilisateurs
+              MongoDB créés avec createUser/updateUser/dropUser. Les rôles
+              intégrés de target_db sont importés comme entitlements
+              MidPoint puis affectés aux comptes (read, readWrite, dbAdmin...).
 
 Odoo (ERP)
   Conteneur : odoo (port 8069) — Image : odoo:17

@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     POSTGRESQL_DATABASE: str = "postgres"
     POSTGRESQL_CONNECT_TIMEOUT: int = 10
 
+    # Target Service: MongoDB
+    MONGODB_HOST: str = "localhost"
+    MONGODB_PORT: int = 27017
+    MONGODB_USER: str = "root"
+    MONGODB_PASSWORD: str = ""
+    MONGODB_DATABASE: str = "target_db"
+    MONGODB_AUTH_SOURCE: str = "admin"
+    MONGODB_CONNECT_TIMEOUT: int = 10
+
     # Target Service: Odoo
     ODOO_URL: str = "http://localhost:8069"
     ODOO_DB: str = "odoo"

@@ -44,6 +44,7 @@ dependencies {
     testImplementation 'org.assertj:assertj-core:3.26.3'
     testImplementation 'org.mockito:mockito-core:4.11.0'
     testImplementation("net.tirasa.connid:connector-framework:${connidVersion}")
+    testImplementation("net.tirasa.connid:connector-framework-internal:${connidVersion}")
 }
 
 jar {

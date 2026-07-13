@@ -53,6 +53,7 @@
         .service-radio.postgresql span { color: #336791; }
         .service-radio.ldap span { color: #FF9800; }
         .service-radio.odoo span { color: #714B67; }
+        .service-radio.mongodb span { color: #47A248; }
         .grants-section { display: none; margin-top: 20px; padding: 20px; background: #1a1a2e; border-radius: 8px; }
         .grants-section.active { display: block; }
         .grants-row { display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px; }
@@ -89,6 +90,7 @@
         .svc-tab.active[data-svc="postgresql"] { border-color: #336791; background: #1b2a3a; color: #6fa8dc; }
         .svc-tab.active[data-svc="ldap"] { border-color: #FF9800; background: #3a2a1b; color: #FF9800; }
         .svc-tab.active[data-svc="odoo"] { border-color: #714B67; background: #2a1b25; color: #c08ab5; }
+        .svc-tab.active[data-svc="mongodb"] { border-color: #47A248; background: #17351c; color: #6fca70; }
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
         .modal-overlay.active { display: flex; }
         .modal { background: #16213e; border-radius: 10px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; }
@@ -163,6 +165,10 @@
                     <label class="service-radio odoo" onclick="selectService('odoo')">
                         <input type="radio" name="target-service" value="odoo">
                         <span>Odoo</span>
+                    </label>
+                    <label class="service-radio mongodb" onclick="selectService('mongodb')">
+                        <input type="radio" name="target-service" value="mongodb">
+                        <span>MongoDB</span>
                     </label>
                 </div>
 
@@ -242,6 +248,20 @@
                     </div>
                 </div>
 
+                <!-- MongoDB Section -->
+                <div id="mongodb-grants-section" class="grants-section">
+                    <h4 style="color: #47A248; margin-bottom: 15px;">Configuration MongoDB</h4>
+                    <div class="form-group">
+                        <label>Rôle MongoDB</label>
+                        <select id="mongodb-role" class="form-select">
+                            <option value="read">read</option>
+                            <option value="readWrite">readWrite</option>
+                            <option value="dbAdmin">dbAdmin</option>
+                            <option value="dbOwner">dbOwner</option>
+                        </select>
+                    </div>
+                </div>
+
                 <div style="margin-top:30px;">
                     <button class="generate-btn" onclick="generateRoleXML()">Generer XML</button>
                     <button class="refresh-btn" onclick="downloadRoleXML()" style="margin-left:10px;">Telecharger</button>
@@ -260,6 +280,7 @@
                     <button class="svc-tab" data-svc="postgresql" onclick="switchUserService('postgresql')">PostgreSQL</button>
                     <button class="svc-tab" data-svc="ldap" onclick="switchUserService('ldap')">LDAP</button>
                     <button class="svc-tab" data-svc="odoo" onclick="switchUserService('odoo')">Odoo</button>
+                    <button class="svc-tab" data-svc="mongodb" onclick="switchUserService('mongodb')">MongoDB</button>
                 </div>
                 <button class="refresh-btn" onclick="loadServiceUsers()">Refresh</button>
                 <button class="btn-sm btn-success" onclick="openCreateUserModal()" style="padding: 10px 20px; font-size: 14px;">+ Nouvel Utilisateur</button>
@@ -795,6 +816,18 @@ function generateRoleXML() {
         xml += '            </attribute>\n';
     }
 
+    if (selectedService === 'mongodb') {
+        var mongodbRole = document.getElementById('mongodb-role').value;
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:roles</ref>\n';
+        xml += '                <outbound><expression><value>mongodb</value></expression></outbound>\n';
+        xml += '            </attribute>\n';
+        xml += '            <attribute>\n';
+        xml += '                <ref>ri:mongodbRoles</ref>\n';
+        xml += '                <outbound><expression><value>' + escapeXml(mongodbRole) + '@target_db</value></expression></outbound>\n';
+        xml += '            </attribute>\n';
+    }
+
     xml += '        </construction>\n';
     xml += '    </inducement>\n';
     xml += '</role>';
@@ -865,6 +898,8 @@ function loadServiceUsers() {
             html += '<th>Username</th><th>CN</th><th>Email</th><th>Groupes</th><th>Actions</th>';
         } else if (currentUserService === 'odoo') {
             html += '<th>Login</th><th>Nom</th><th>Email</th><th>Actif</th><th>Actions</th>';
+        } else if (currentUserService === 'mongodb') {
+            html += '<th>Username</th><th>Base</th><th>Rôles</th><th>Actions</th>';
         }
         html += '</tr></thead><tbody>';
 
@@ -918,6 +953,13 @@ function loadServiceUsers() {
                 html += '<td class="user-actions">';
                 html += '<button class="btn-sm btn-edit" onclick="openEditUserModal(\'' + escapeXml(u.username) + '\')" title="Modifier">&#9881;</button>';
                 html += '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escapeXml(u.username) + '\')">Supprimer</button></td>';
+            } else if (currentUserService === 'mongodb') {
+                html += '<td>' + escapeXml(u.username) + '</td>';
+                html += '<td>' + escapeXml(u.database || 'target_db') + '</td>';
+                html += '<td>' + escapeXml((u.roles || []).join(', ')) + '</td>';
+                html += '<td class="user-actions">';
+                html += '<button class="btn-sm btn-edit" onclick="openEditUserModal(\'' + escapeXml(u.username) + '\')" title="Modifier">&#9881;</button>';
+                html += '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escapeXml(u.username) + '\')">Supprimer</button></td>';
             }
             html += '</tr>';
         });
@@ -967,7 +1009,7 @@ function loadCreateRoles() {
             container.innerHTML = '<p style="color:#888;">Aucun role disponible</p>';
             return;
         }
-        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo');
+        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo' || currentUserService === 'mongodb');
         var html = '<div class="role-checkboxes">';
         data.roles.forEach(function(r, i) {
             if (isMulti) {
@@ -1126,7 +1168,7 @@ function loadEditRoles(userData) {
             return;
         }
 
-        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo');
+        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo' || currentUserService === 'mongodb');
 
         if (isMulti) {
             // Pour LDAP et Odoo: liste deroulante multi-select avec checkboxes
@@ -1201,6 +1243,8 @@ function updateUser() {
     } else if (currentUserService === 'odoo') {
         payload.fullName = document.getElementById('edit-fullname').value.trim();
         payload.odooGroups = roles;
+    } else if (currentUserService === 'mongodb') {
+        payload.mongodbRoles = roles;
     }
 
     fetch('/api/users/' + currentUserService + '/' + encodeURIComponent(username), {
@@ -1261,7 +1305,7 @@ function loadAssignRoles() {
             container.innerHTML = '<p style="color:#888;">Aucun role disponible</p>';
             return;
         }
-        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo');
+        var isMulti = (currentUserService === 'ldap' || currentUserService === 'odoo' || currentUserService === 'mongodb');
         var html = '<div class="role-checkboxes">';
         data.roles.forEach(function(r, i) {
             if (isMulti) {

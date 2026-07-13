@@ -31,6 +31,19 @@
   retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
   delay: "{{ service_wait_delay }}"
 
+- name: Wait for MongoDB target
+  ansible.builtin.command:
+    cmd: >-
+      docker exec gitivity-mongodb mongosh --quiet --username root
+      --password mongodb_root_secret --authenticationDatabase admin
+      --eval "quit(db.adminCommand('ping').ok ? 0 : 1)"
+  register: mongodb_ping
+  until: mongodb_ping.rc == 0
+  retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+  changed_when: false
+  when: with_targets | bool
+
 - name: Wait for MidPoint REST API
   ansible.builtin.uri:
     url: "{{ midpoint_url }}/ws/rest/self"

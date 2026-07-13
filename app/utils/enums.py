@@ -42,6 +42,7 @@ class TargetService(str, Enum):
     POSTGRESQL = "POSTGRESQL"
     ODOO = "ODOO"
     LDAP = "LDAP"
+    MONGODB = "MONGODB"
 
 
 class BrokerType(str, Enum):

@@ -250,6 +250,9 @@ class RabbitMQConsumer(BrokerConsumer):
         "ldap4": TargetService.LDAP,
         "activedirectory": TargetService.LDAP,
         "ad": TargetService.LDAP,
+        # MongoDB aliases
+        "mongodb": TargetService.MONGODB,
+        "mongo": TargetService.MONGODB,
     }
 
     # Mapping from MidPoint operation to OperationType
@@ -342,6 +345,10 @@ class RabbitMQConsumer(BrokerConsumer):
         if isinstance(odoo_groups, str):
             odoo_groups = [odoo_groups]
 
+        mongodb_roles = attributes.get("mongodbRoles", [])
+        if isinstance(mongodb_roles, str):
+            mongodb_roles = [mongodb_roles]
+
         # Build user data - include all key attributes for connectors
         first_name = attributes.get("firstName")
         last_name = attributes.get("lastName")
@@ -408,7 +415,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 try:
                     from app.db.redis_client import RedisClient
                     redis_client = await RedisClient.get_client()
-                    for svc in ["MYSQL", "POSTGRESQL", "LDAP", "ODOO"]:
+                    for svc in ["MYSQL", "POSTGRESQL", "LDAP", "ODOO", "MONGODB"]:
                         keys = await redis_client.keys(f"user_state:{svc}:*")
                         for k in keys:
                             value = await redis_client.get(k)
@@ -470,6 +477,9 @@ class RabbitMQConsumer(BrokerConsumer):
                 # PostgreSQL-specific: direct SQL grants (comma-separated) or role
                 "postgresqlGrants": attributes.get("postgresqlGrants"),
                 "postgresqlRole": attributes.get("postgresqlRole"),
+                # MongoDB-specific: database-scoped native roles
+                "mongodbRoles": mongodb_roles,
+                "mongodbDatabase": attributes.get("mongodbDatabase"),
                 # Employee-specific attributes
                 "employeeNumber": attributes.get("employeeNumber"),
                 "personalNumber": attributes.get("personalNumber"),
@@ -515,10 +525,19 @@ class RabbitMQConsumer(BrokerConsumer):
             if odoo_groups and TargetService.ODOO not in target_services:
                 target_services.append(TargetService.ODOO)
 
+            if mongodb_roles and TargetService.MONGODB not in target_services:
+                target_services.append(TargetService.MONGODB)
+
             # If still no services (no cache, no roles, no groups), try ALL services
             if not target_services:
                 logger.info("DELETE operation without any hints - attempting deletion from ALL services")
-                target_services = [TargetService.MYSQL, TargetService.POSTGRESQL, TargetService.LDAP, TargetService.ODOO]
+                target_services = [
+                    TargetService.MYSQL,
+                    TargetService.POSTGRESQL,
+                    TargetService.LDAP,
+                    TargetService.ODOO,
+                    TargetService.MONGODB,
+                ]
 
         # Handle role removal (removedRoles attribute from Java connector)
         elif removed_roles:

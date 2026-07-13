@@ -1,5 +1,6 @@
 package lu.lns.connector.restgateway;
 
+import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.objects.*;
 import org.junit.Test;
 
@@ -42,6 +43,18 @@ public class JsonMapperTest {
         assertEquals(2, roles.size());
         assertTrue(roles.contains("ROLE_USER"));
         assertTrue(roles.contains("ROLE_ADMIN"));
+    }
+
+    @Test
+    public void testOperationalPasswordIsMappedForCreate() {
+        Set<Attribute> attributes = new HashSet<>();
+        GuardedString password = new GuardedString("V7!qZ2#rP9@xL4".toCharArray());
+        attributes.add(AttributeBuilder.build(OperationalAttributes.PASSWORD_NAME, password));
+
+        Map<String, Object> result = JsonMapper.attributesToMap(attributes);
+
+        assertEquals("V7!qZ2#rP9@xL4", result.get("password"));
+        assertFalse(result.containsKey(OperationalAttributes.PASSWORD_NAME));
     }
 
     @Test
@@ -103,5 +116,19 @@ public class JsonMapperTest {
 
         assertEquals("newemail@example.com", result.get("email"));
         assertEquals(false, result.get("enabled"));
+    }
+
+    @Test
+    public void testOperationalPasswordIsMappedForUpdate() {
+        Set<AttributeDelta> deltas = new HashSet<>();
+        GuardedString password = new GuardedString("N8@wK4!sT2#yQ6".toCharArray());
+        deltas.add(AttributeDeltaBuilder.build(
+                OperationalAttributes.PASSWORD_NAME,
+                password));
+
+        Map<String, Object> result = JsonMapper.attributeDeltasToMap(deltas);
+
+        assertEquals("N8@wK4!sT2#yQ6", result.get("password"));
+        assertFalse(result.containsKey(OperationalAttributes.PASSWORD_NAME));
     }
 }

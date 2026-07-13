@@ -9,11 +9,11 @@
     <name>gateway-iam</name>
 
     <connectorRef oid="84505b3d-5f90-4617-a160-6548be000a44" type="c:ConnectorType">
-        <!-- ConnId lu.lns.connector.restgateway.RestGatewayConnector v1.2.0-SNAPSHOT -->
+        <!-- ConnId GateWay-IAM / lu.lns.connector.restgateway.RestGatewayConnector v1.2.0-SNAPSHOT -->
     </connectorRef>
 
     <connectorConfiguration xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
-        <icfc:configurationProperties xmlns:gen="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/lu.lns.connector.restgateway/lu.lns.connector.restgateway.RestGatewayConnector">
+        <icfc:configurationProperties xmlns:gen="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/GateWay-IAM/lu.lns.connector.restgateway.RestGatewayConnector">
             <gen:useRabbitmq>true</gen:useRabbitmq>
             <gen:rabbitmqHost>rabbitmq</gen:rabbitmqHost>
             <gen:rabbitmqPort>5672</gen:rabbitmqPort>
@@ -330,6 +330,16 @@
                 <valueAttribute>icfs:uid</valueAttribute>
             </association>
 
+            <association>
+                <ref>ri:mongodbRole</ref>
+                <displayName>Rôle MongoDB</displayName>
+                <kind>entitlement</kind>
+                <intent>mongodbRole</intent>
+                <direction>subjectToObject</direction>
+                <associationAttribute>ri:mongodbRoles</associationAttribute>
+                <valueAttribute>icfs:uid</valueAttribute>
+            </association>
+
             <activation>
                 <administrativeStatus>
                     <outbound>
@@ -412,6 +422,30 @@
             <attribute>
                 <ref>ri:grants</ref>
                 <displayName>Grants SQL</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:description</ref>
+                <displayName>Description</displayName>
+            </attribute>
+        </objectType>
+
+        <!-- Rôles MongoDB découverts dynamiquement -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>mongodbRole</intent>
+            <objectClass>ri:CustomMongoDbRoleObjectClass</objectClass>
+
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>Identifiant rôle@base</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:roleName</ref>
+                <displayName>Nom du rôle</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:database</ref>
+                <displayName>Base MongoDB</displayName>
             </attribute>
             <attribute>
                 <ref>ri:description</ref>

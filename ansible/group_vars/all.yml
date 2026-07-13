@@ -11,9 +11,14 @@ project_repo_src: "{{ playbook_dir | dirname }}"   # local path of the repo
 # Service ports are bound only on this address, not on every host interface.
 service_bind_ip: "10.10.0.1"
 server_ip: "{{ service_bind_ip }}"
+# Port publié par le PostgreSQL cible. Modifiable si une instance existante
+# utilise déjà 5433 sur service_bind_ip.
+postgresql_target_host_port: 5433
+# Port publié par la nouvelle cible MongoDB. Le port interne reste 27017.
+mongodb_target_host_port: 27017
 
 # --- Profiles -----------------------------------------------------------------
-with_targets: false     # set true to also start LDAP/MySQL/PostgreSQL/Odoo
+with_targets: false     # set true to also start LDAP/MySQL/PostgreSQL/MongoDB/Odoo
 with_midpoint: true     # set false to skip MidPoint setup
 
 # --- SMTP (approval + confirmation emails) ------------------------------------
@@ -53,7 +58,7 @@ midpoint_gateway_url: "{{ midpoint_url if (midpoint_external | bool) else 'http:
 # Bundle name comes from the gradle project name (settings.gradle)
 connector_bundle: GateWay-IAM
 # Former bundle name still present in ressource.xml's connectorConfiguration namespace
-old_connector_bundle_ns: lu.lns.connector.restgateway
+old_connector_bundle_ns: GateWay-IAM
 connector_version: 1.2.0-SNAPSHOT
 # settings.gradle rootProject.name = 'GateWay-IAM' determines the JAR file name
 jar_name: GateWay-IAM-1.2.0-SNAPSHOT.jar

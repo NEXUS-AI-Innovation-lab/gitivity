@@ -53,6 +53,14 @@
         {"profileName": "readwrite", "grants": "SELECT, INSERT, UPDATE", "description": "Lecture et écriture"},
         {"profileName": "admin", "grants": "ALL PRIVILEGES", "description": "Administrateur complet"}
       ]
+    },
+    "mongodb": {
+      "roles": [
+        {"roleName": "read", "database": "target_db", "description": "Lecture seule"},
+        {"roleName": "readWrite", "database": "target_db", "description": "Lecture et écriture"},
+        {"roleName": "dbAdmin", "database": "target_db", "description": "Administration de la base"},
+        {"roleName": "dbOwner", "database": "target_db", "description": "Propriétaire de la base"}
+      ]
     }
   }
 }

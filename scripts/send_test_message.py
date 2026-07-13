@@ -6,6 +6,7 @@ Usage:
     python scripts/send_test_message.py --service mysql --action create
     python scripts/send_test_message.py --service postgresql --action create
     python scripts/send_test_message.py --service odoo --action create
+    python scripts/send_test_message.py --service mongodb --action create
     python scripts/send_test_message.py --fixture create_user_mysql
     python scripts/send_test_message.py --custom '{"request_id": "...", ...}'
 """
@@ -76,6 +77,10 @@ def generate_message(service: str, action: str) -> dict:
             "name": f"{base_user_data['first_name']} {base_user_data['last_name']}",
             "lang": "en_US",
             "tz": "UTC",
+        },
+        "mongodb": {
+            "mongodbDatabase": "target_db",
+            "mongodbRoles": ["readWrite"],
         },
     }
 
@@ -152,7 +157,7 @@ Examples:
 
     parser.add_argument(
         "--service",
-        choices=["mysql", "postgresql", "odoo"],
+        choices=["mysql", "postgresql", "odoo", "mongodb"],
         help="Target service for generated message",
     )
     parser.add_argument(

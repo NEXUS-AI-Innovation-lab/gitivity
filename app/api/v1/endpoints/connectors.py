@@ -102,6 +102,14 @@ def get_gateway_connector_config(service: TargetService) -> dict[str, Any]:
             "use_ssl": settings.LDAP_USE_SSL,
             "base_dn": settings.LDAP_BASE_DN,
         }
+    elif service == TargetService.MONGODB:
+        return {
+            "host": settings.MONGODB_HOST,
+            "port": settings.MONGODB_PORT,
+            "user": settings.MONGODB_USER,
+            "database": settings.MONGODB_DATABASE,
+            "auth_source": settings.MONGODB_AUTH_SOURCE,
+        }
     return {}
 
 
@@ -554,6 +562,17 @@ async def update_gateway_connector_config(connector_name: str, config: Connector
             settings.LDAP_HOST = config.host
         if config.port:
             settings.LDAP_PORT = config.port
+    elif service == TargetService.MONGODB:
+        if config.host:
+            settings.MONGODB_HOST = config.host
+        if config.port:
+            settings.MONGODB_PORT = config.port
+        if config.user:
+            settings.MONGODB_USER = config.user
+        if config.password:
+            settings.MONGODB_PASSWORD = config.password
+        if config.database:
+            settings.MONGODB_DATABASE = config.database
 
     logger.info(f"Updated configuration for Gateway connector: {connector_name}")
 

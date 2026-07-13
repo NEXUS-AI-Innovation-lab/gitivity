@@ -9,7 +9,7 @@
 # Options:
 #   --skip-build      Skip Gradle connector build
 #   --skip-midpoint   Skip MidPoint setup entirely
-#   --targets         Also start target services (LDAP, MySQL, PostgreSQL, Odoo)
+#   --targets         Also start target services (LDAP, MySQL, PostgreSQL, MongoDB, Odoo)
 #   --help, -h        Show this help
 set -euo pipefail
 
@@ -33,12 +33,12 @@ MIDPOINT_USER="administrator"
 MIDPOINT_PASS="Test5ecr3t"
 MIDPOINT_CONTAINER="gitivity-midpoint"
 CONNECTOR_DIR="$PROJECT_ROOT/midpoint-connector"
-JAR_NAME="connector-restgateway-1.2.0-SNAPSHOT.jar"
+JAR_NAME="GateWay-IAM-1.2.0-SNAPSHOT.jar"
 JAR_PATH="$CONNECTOR_DIR/build/libs/$JAR_NAME"
 ICF_CONNECTORS_PATH="/opt/midpoint/var/icf-connectors/"
 RESOURCE_XML="$PROJECT_ROOT/midpoint/ressource.xml"
 ROLES_DIR="$PROJECT_ROOT/midpoint/roles"
-CONNECTOR_BUNDLE="lu.lns.connector.restgateway"
+CONNECTOR_BUNDLE="GateWay-IAM"
 CONNECTOR_VERSION="1.2.0-SNAPSHOT"
 OLD_CONNECTOR_OID="84505b3d-5f90-4617-a160-6548be000a44"
 RESOURCE_OID="736ea741-2c73-4478-b5d1-07d84cdf860f"
@@ -92,12 +92,12 @@ Full from-scratch setup for Gateway IAM:
   1. Start all Docker services (default profile + midpoint profile)
   2. Wait for every service to be ready
   3. Build & deploy MidPoint connector JAR
-  4. Import MidPoint resource + 10 roles
+  4. Import MidPoint resource + roles and launch the MongoDB entitlement import
 
 Options:
   --skip-build      Skip Gradle connector build (JAR must already exist)
   --skip-midpoint   Skip MidPoint connector + resource + role setup
-  --targets         Also start target services (LDAP, MySQL, PostgreSQL, Odoo)
+  --targets         Also start target services (LDAP, MySQL, PostgreSQL, MongoDB, Odoo)
   --help, -h        Show this help
 
 Prerequisites:
@@ -406,12 +406,15 @@ import_roles() {
         "$ROLES_DIR/role-mysql.xml"
         "$ROLES_DIR/role-postgresql.xml"
         "$ROLES_DIR/role-odoo.xml"
+        "$ROLES_DIR/role-mongodb.xml"
         "$ROLES_DIR/role-gateway-mysql-shadowref.xml"
         "$ROLES_DIR/role-gateway-mysql-shadowref admin.xml"
         "$ROLES_DIR/role-gateway-postgresql-shadowref.xml"
         "$ROLES_DIR/role-gateway-postgresql-shadowref admin.xml"
         "$ROLES_DIR/role-gateway-ldap-shadowref.xml"
         "$ROLES_DIR/role-gateway-ldap-shadowref admin.xml"
+        "$ROLES_DIR/role-gateway-mongodb-shadowref.xml"
+        "$ROLES_DIR/role-gateway-mongodb-shadowref-admin.xml"
     )
 
     local ok=0 fail=0
@@ -469,6 +472,32 @@ import_roles() {
 }
 
 # ---------------------------------------------------------------------------
+# Ask MidPoint to create/update MongoDB entitlement shadows
+# ---------------------------------------------------------------------------
+import_mongodb_entitlements() {
+    if [[ "$WITH_TARGETS" != true ]]; then
+        log_info "MongoDB target not started; skipping entitlement import task"
+        return
+    fi
+
+    log_step "Import MongoDB entitlements"
+    local code
+    code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST \
+        -u "$MIDPOINT_USER:$MIDPOINT_PASS" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$MIDPOINT_URL/ws/rest/resources/$RESOURCE_OID/import/CustomMongoDbRoleObjectClass" \
+        2>/dev/null)
+
+    if [[ "$code" =~ ^(200|201|202|303)$ ]]; then
+        log_success "MongoDB entitlement import task started (HTTP $code)"
+    else
+        die "Could not start MongoDB entitlement import task (HTTP $code)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Final summary
 # ---------------------------------------------------------------------------
 print_summary() {
@@ -491,6 +520,7 @@ print_summary() {
         echo "    LDAP            →  localhost:10389"
         echo "    MySQL           →  localhost:3306"
         echo "    PostgreSQL      →  localhost:5433"
+        echo "    MongoDB         →  localhost:27017"
         echo "    Odoo            →  http://localhost:8069"
     fi
     echo ""
@@ -523,6 +553,7 @@ main() {
         discover_connector_oid
         import_resource
         import_roles
+        import_mongodb_entitlements
     else
         log_warn "Skipping MidPoint setup (--skip-midpoint)"
     fi

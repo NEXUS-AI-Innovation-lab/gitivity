@@ -15,13 +15,13 @@ MIDPOINT_PASS="Test5ecr3t"
 MIDPOINT_CONTAINER="gitivity-midpoint"
 
 CONNECTOR_DIR="$PROJECT_ROOT/midpoint-connector"
-JAR_NAME="connector-restgateway-1.2.0-SNAPSHOT.jar"
+JAR_NAME="GateWay-IAM-1.2.0-SNAPSHOT.jar"
 JAR_PATH="$CONNECTOR_DIR/build/libs/$JAR_NAME"
 ICF_CONNECTORS_PATH="/opt/midpoint/var/icf-connectors/"
 
 RESOURCE_XML="$PROJECT_ROOT/midpoint/ressource.xml"
 
-CONNECTOR_BUNDLE="lu.lns.connector.restgateway"
+CONNECTOR_BUNDLE="GateWay-IAM"
 CONNECTOR_VERSION="1.2.0-SNAPSHOT"
 
 # OID hardcoded in ressource.xml's connectorRef — must be replaced with the

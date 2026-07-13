@@ -40,6 +40,7 @@ enum TargetService {
   POSTGRESQL
   ODOO
   LDAP
+  MONGODB
 }
 
 // Main Models
