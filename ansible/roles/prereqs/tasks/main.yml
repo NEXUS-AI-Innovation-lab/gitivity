@@ -29,16 +29,42 @@
   become: true
   when: with_midpoint | bool
 
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Select Docker package family
+  ansible.builtin.set_fact:
+    docker_package_family: >-
+      {{
+        'official'
+        if (
+          'containerd.io' in ansible_facts.packages or
+          'docker-ce' in ansible_facts.packages or
+          'docker-ce-cli' in ansible_facts.packages
+        )
+        else 'ubuntu'
+      }}
+
 # Ubuntu archive packages: available on all releases including brand-new ones
 # (download.docker.com lags behind new Ubuntu versions)
 - name: Install Docker Engine and Compose plugin
   ansible.builtin.apt:
-    name:
-      - docker.io
-      - docker-compose-v2
-      - docker-buildx
+    name: "{{ docker_packages[docker_package_family] }}"
     state: present
   become: true
+  vars:
+    docker_packages:
+      ubuntu:
+        - docker.io
+        - docker-compose-v2
+        - docker-buildx
+      official:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
 
 - name: Enable and start Docker service
   ansible.builtin.systemd:

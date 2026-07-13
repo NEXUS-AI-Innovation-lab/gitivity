@@ -48,14 +48,14 @@
 
 - name: Pull / build Docker images
   ansible.builtin.command:
-    cmd: docker compose {{ compose_profiles }} build --pull
+    cmd: docker compose --env-file .env.docker {{ compose_profiles }} build --pull
     chdir: "{{ project_dir }}"
   register: compose_build
   changed_when: "'Successfully built' in compose_build.stdout or compose_build.rc == 0"
 
 - name: Start all services
   ansible.builtin.command:
-    cmd: docker compose {{ compose_profiles }} up -d --remove-orphans
+    cmd: docker compose --env-file .env.docker {{ compose_profiles }} up -d --remove-orphans
     chdir: "{{ project_dir }}"
   register: compose_up
   changed_when: compose_up.rc == 0

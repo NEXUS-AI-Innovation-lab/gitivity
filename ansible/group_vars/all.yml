@@ -8,8 +8,9 @@ project_dir: /opt/gitivity
 project_repo_src: "{{ playbook_dir | dirname }}"   # local path of the repo
 
 # --- Server IP (used in approval email links and service URLs) ----------------
-# Set via: ansible-playbook site.yml -e "server_ip=10.10.0.1"
-server_ip: "{{ ansible_host }}"
+# Service ports are bound only on this address, not on every host interface.
+service_bind_ip: "10.10.0.1"
+server_ip: "{{ service_bind_ip }}"
 
 # --- Profiles -----------------------------------------------------------------
 with_targets: false     # set true to also start LDAP/MySQL/PostgreSQL/Odoo
@@ -32,10 +33,10 @@ midpoint_admin_password: Test5ecr3t
 #     -e midpoint_host=10.0.0.5 -e midpoint_port=8080 \
 #     -e midpoint_admin_password=<password>
 midpoint_external: false
-midpoint_host: localhost     # external mode: IP/hostname of the existing MidPoint
+midpoint_host: "{{ service_bind_ip }}"     # external mode: IP/hostname of the existing MidPoint
 midpoint_port: 8080
-# localhost when local: the REST/health tasks run ON the target host
-# (AWS blocks hairpin to own public IP)
+# service_bind_ip when local: REST/health tasks run ON the target host, through
+# the same interface where Docker publishes MidPoint.
 midpoint_url: "http://{{ midpoint_host }}:{{ midpoint_port }}/midpoint"
 
 # Docker container holding MidPoint. With an external instance running in

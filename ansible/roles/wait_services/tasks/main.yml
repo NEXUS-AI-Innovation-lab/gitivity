@@ -3,7 +3,7 @@
 
 - name: Wait for RabbitMQ management UI
   ansible.builtin.uri:
-    url: "http://localhost:15672"
+    url: "http://{{ service_bind_ip }}:15672"
     method: GET
     status_code: 200
   register: result
@@ -13,7 +13,7 @@
 
 - name: Wait for Gateway HTTP (entitlements)
   ansible.builtin.uri:
-    url: "http://localhost:5100/health"
+    url: "http://{{ service_bind_ip }}:5100/health"
     method: GET
     status_code: 200
   register: result
@@ -23,7 +23,7 @@
 
 - name: Wait for Gateway API
   ansible.builtin.uri:
-    url: "http://localhost:8100/health"
+    url: "http://{{ service_bind_ip }}:8100/health"
     method: GET
     status_code: 200
   register: result

@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ansible-playbook -i inventory/hosts.yml site.yml \
-#     -e "server_ip=<YOUR_IP>" \
+#     [-e "service_bind_ip=10.10.0.1"] \
 #     [-e "smtp_user=you@gmail.com" -e "smtp_password=xxxx"] \
 #     [-e "approval_mode=auto"] \
 #     [-e "with_targets=true"] \
@@ -12,7 +12,7 @@
 #     [-e "skip_build=true"]
 #
 # MidPoint EXISTANT (non géré par ce playbook, expose <ip>:<port>) :
-#   ansible-playbook site.yml -e "server_ip=<IP_GATEWAY>" \
+#   ansible-playbook site.yml -e "service_bind_ip=<IP_GATEWAY>" \
 #     -e "midpoint_external=true" \
 #     -e "midpoint_host=<IP_MIDPOINT>" -e "midpoint_port=<PORT>" \
 #     -e "midpoint_admin_user=administrator" -e "midpoint_admin_password=<MDP>" \
