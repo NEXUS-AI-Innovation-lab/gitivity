@@ -15,12 +15,12 @@
     <connectorConfiguration xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
         <icfc:configurationProperties xmlns:gen="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/GateWay-IAM/lu.lns.connector.restgateway.RestGatewayConnector">
             <gen:useRabbitmq>true</gen:useRabbitmq>
-            <gen:rabbitmqHost>rabbitmq</gen:rabbitmqHost>
+            <gen:rabbitmqHost>10.10.0.1</gen:rabbitmqHost>
             <gen:rabbitmqPort>5672</gen:rabbitmqPort>
             <gen:rabbitmqUsername>guest</gen:rabbitmqUsername>
             <gen:rabbitmqPassword>guest</gen:rabbitmqPassword>
             <gen:rabbitmqQueue>gateway-iam-provisioning</gen:rabbitmqQueue>
-            <gen:gatewayUrl>http://gateway-http:5100</gen:gatewayUrl>
+            <gen:gatewayUrl>http://10.10.0.1:5100</gen:gatewayUrl>
         </icfc:configurationProperties>
     </connectorConfiguration>
 
