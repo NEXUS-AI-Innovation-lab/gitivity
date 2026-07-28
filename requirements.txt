@@ -55,7 +55,7 @@ pytest
 pytest-asyncio
 pytest-cov
 black
-ruff
+ruff==0.16.0
 mypy
 
 # Type stubs
