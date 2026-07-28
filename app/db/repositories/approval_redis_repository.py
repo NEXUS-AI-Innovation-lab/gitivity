@@ -6,6 +6,8 @@ from typing import Optional
 
 import redis.asyncio as redis
 
+from app.config.target_catalog import target_catalog
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +22,52 @@ class ApprovalRedisRepository:
         """
         self.redis = redis_client
         self.ttl = 7200  # 2 hours in seconds
+
+    @staticmethod
+    def _canonical_target_service(target_service: str) -> str:
+        normalized = target_service.strip()
+        if not normalized:
+            return normalized
+        try:
+            return target_catalog.resolve(normalized).id
+        except Exception:
+            return normalized.lower()
+
+    @classmethod
+    def _target_variants(cls, target_service: str) -> list[str]:
+        canonical = cls._canonical_target_service(target_service)
+        raw = target_service.strip()
+        variants = [
+            canonical,
+            raw,
+            raw.lower(),
+            raw.upper(),
+        ]
+        return list(dict.fromkeys(value for value in variants if value))
+
+    async def _get_first_matching_key(
+        self,
+        prefix: str,
+        target_service: str,
+        suffix: str,
+    ) -> tuple[str | None, str]:
+        canonical_target = self._canonical_target_service(target_service)
+        canonical_key = f"{prefix}:{canonical_target}:{suffix}"
+
+        for candidate in self._target_variants(target_service):
+            key = f"{prefix}:{candidate}:{suffix}"
+            value = await self.redis.get(key)
+            if value is not None:
+                if key != canonical_key:
+                    ttl = await self.redis.ttl(key)
+                    if ttl and ttl > 0:
+                        await self.redis.setex(canonical_key, ttl, value)
+                    else:
+                        await self.redis.set(canonical_key, value)
+                    await self.redis.delete(key)
+                return value, canonical_key
+
+        return None, canonical_key
 
     async def add_pending_approval(
         self, operation_id: str, operation_data: dict
@@ -38,11 +86,14 @@ class ApprovalRedisRepository:
             True if stored successfully, False otherwise
         """
         try:
+            target_service = self._canonical_target_service(
+                operation_data["target_service"]
+            )
             key = f"approval:pending:{operation_id}"
             value = json.dumps(
                 {
                     "operation_id": operation_id,
-                    "target_service": operation_data["target_service"],
+                    "target_service": target_service,
                     "operation_type": operation_data["operation_type"],
                     "user_data": operation_data["user_data"],
                     "midpoint_message": operation_data["midpoint_message"],
@@ -273,7 +324,8 @@ class ApprovalRedisRepository:
             True if stored successfully
         """
         try:
-            key = f"rejected_create:{target_service}:{username}"
+            canonical_target = self._canonical_target_service(target_service)
+            key = f"rejected_create:{canonical_target}:{username}"
             value = json.dumps({
                 "operation_id": operation_id,
                 "rejected_at": datetime.now(timezone.utc).isoformat(),
@@ -303,8 +355,11 @@ class ApprovalRedisRepository:
             True if a rejected CREATE exists
         """
         try:
-            key = f"rejected_create:{target_service}:{username}"
-            result = await self.redis.get(key)
+            result, _ = await self._get_first_matching_key(
+                "rejected_create",
+                target_service,
+                username,
+            )
             return result is not None
         except Exception as e:
             logger.error(f"Failed to check rejected CREATE marker: {e}")
@@ -326,7 +381,8 @@ class ApprovalRedisRepository:
             True if stored successfully
         """
         try:
-            key = f"user_state:{target_service}:{username}"
+            canonical_target = self._canonical_target_service(target_service)
+            key = f"user_state:{canonical_target}:{username}"
             value = json.dumps(user_data)
             ttl = 90 * 24 * 3600  # 90 days
             result = await self.redis.setex(key, ttl, value)
@@ -349,8 +405,11 @@ class ApprovalRedisRepository:
             User data dict if found, None otherwise
         """
         try:
-            key = f"user_state:{target_service}:{username}"
-            value = await self.redis.get(key)
+            value, _ = await self._get_first_matching_key(
+                "user_state",
+                target_service,
+                username,
+            )
             if value:
                 return json.loads(value)
             return None
@@ -371,13 +430,15 @@ class ApprovalRedisRepository:
             True if deleted
         """
         try:
-            key = f"rejected_create:{target_service}:{username}"
-            result = await self.redis.delete(key)
-            if result > 0:
+            deleted = 0
+            for candidate in self._target_variants(target_service):
+                key = f"rejected_create:{candidate}:{username}"
+                deleted += await self.redis.delete(key)
+            if deleted > 0:
                 logger.info(
                     f"Cleared rejected CREATE marker: {username} on {target_service}"
                 )
-            return result > 0
+            return deleted > 0
         except Exception as e:
             logger.error(f"Failed to clear rejected CREATE marker: {e}")
             return False

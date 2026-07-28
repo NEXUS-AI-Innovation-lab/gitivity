@@ -157,6 +157,94 @@ class TestProvisioningOrchestrator:
 
             mock_audit.log_error.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_finds_identical_pending_update_with_reordered_roles(
+        self,
+        orchestrator,
+    ):
+        message = MidPointMessage(
+            request_id="mp-mongodb-2",
+            operation_type=OperationType.UPDATE_USER,
+            target_service=TargetService.MONGODB,
+            target_id="mongodb",
+            user_data=UserData(
+                username="Mario",
+                email="mario@example.com",
+                roles=["mongodb", "EXTERNE"],
+                attributes={
+                    "mongodbRoles": [
+                        "readWrite@target_db",
+                        "dbAdmin@target_db",
+                    ]
+                },
+            ),
+        )
+        approval_repo = AsyncMock()
+        approval_repo.list_all_pending.return_value = [
+            {
+                "operation_id": "pending-1",
+                "operation_type": OperationType.UPDATE_USER.value,
+                "target_service": "mongodb",
+                "user_data": {
+                    "username": "Mario",
+                    "email": "mario@example.com",
+                    "first_name": None,
+                    "last_name": None,
+                    "password": None,
+                    "roles": ["EXTERNE", "mongodb"],
+                    "attributes": {
+                        "mongodbRoles": [
+                            "dbAdmin@target_db",
+                            "readWrite@target_db",
+                        ]
+                    },
+                },
+            }
+        ]
+        orchestrator._approval_redis_repo = approval_repo
+
+        duplicate = await orchestrator._find_duplicate_pending_update(message)
+
+        assert duplicate == "pending-1"
+
+    @pytest.mark.asyncio
+    async def test_does_not_match_pending_update_with_different_payload(
+        self,
+        orchestrator,
+    ):
+        message = MidPointMessage(
+            request_id="mp-mongodb-3",
+            operation_type=OperationType.UPDATE_USER,
+            target_service=TargetService.MONGODB,
+            target_id="mongodb",
+            user_data=UserData(
+                username="Mario",
+                attributes={"mongodbRoles": ["readWrite@target_db"]},
+            ),
+        )
+        approval_repo = AsyncMock()
+        approval_repo.list_all_pending.return_value = [
+            {
+                "operation_id": "pending-1",
+                "operation_type": OperationType.UPDATE_USER.value,
+                "target_service": "mongodb",
+                "user_data": {
+                    "username": "Mario",
+                    "email": None,
+                    "first_name": None,
+                    "last_name": None,
+                    "password": None,
+                    "roles": [],
+                    "attributes": {"mongodbRoles": ["dbAdmin@target_db"]},
+                },
+            }
+        ]
+        orchestrator._approval_redis_repo = approval_repo
+
+        duplicate = await orchestrator._find_duplicate_pending_update(message)
+
+        assert duplicate is None
+
 
 class TestExecuteOperation:
     """Tests for _execute_operation method"""

@@ -1,5 +1,37 @@
 ---
-# Sync project, write .env.docker with server IP, build images, bring up services
+# Sync project, migrate state, build images, and perform an ordered rollout.
+
+- name: Read target catalogue from the controller
+  ansible.builtin.set_fact:
+    gateway_target_catalog: >-
+      {{ lookup('ansible.builtin.file', project_repo_src ~ '/config/targets.yaml')
+         | from_yaml }}
+
+- name: Require canonical lowercase target identifiers
+  ansible.builtin.assert:
+    that:
+      - item.id == (item.id | lower)
+      - item.type == (item.type | lower)
+    fail_msg: >-
+      Target '{{ item.id }}' must use lowercase id/type in config/targets.yaml.
+      Environment variable names such as MONGODB_HOST may remain uppercase;
+      logical target identifiers may not.
+  loop: "{{ gateway_target_catalog.targets | default([]) }}"
+  loop_control:
+    label: "{{ item.id | default('unknown') }}"
+
+- name: Enforce Gateway application rollout contract
+  ansible.builtin.assert:
+    that:
+      - item.marker in lookup('ansible.builtin.file', project_repo_src ~ '/' ~ item.path)
+    fail_msg: >-
+      Refusing to deploy stale Gateway sources: {{ item.path }} does not contain
+      the required protection '{{ item.marker }}'. Port and commit the production
+      hotfix from 2026-07-28 before running this playbook, otherwise Ansible would
+      overwrite /opt/gitivity and rebuild a regressed image.
+  loop: "{{ gateway_required_application_markers }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Create project directory
   ansible.builtin.file:
@@ -24,7 +56,9 @@
       - "--exclude=midpoint-connector/.gradle"
       - "--exclude=dumps"
       - "--exclude=ansible"
-    delete: false
+    # /opt/gitivity is a deployment artefact, not a second source tree. Keeping
+    # stale Python files here can make a rebuilt image differ from the checkout.
+    delete: true
     recursive: true
 
 - name: Make gradlew executable
@@ -46,6 +80,93 @@
       {{ '--profile midpoint' if (with_midpoint | bool and not midpoint_external | bool) else '' }}
       {{ '--profile targets' if with_targets | bool else '' }}
 
+- name: Check whether the Gateway consumer exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - gitivity-consumer
+  register: gateway_consumer_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Stop the Gateway consumer during state migration and image rollout
+  ansible.builtin.command:
+    argv:
+      - docker
+      - stop
+      - gitivity-consumer
+  when:
+    - gateway_consumer_inspect.rc == 0
+    - (gateway_consumer_inspect.stdout | from_json)[0].State.Running | bool
+  register: gateway_consumer_stop
+  changed_when: gateway_consumer_stop.rc == 0
+
+- name: Check whether Redis is available for an in-place migration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - gitivity-redis
+      - redis-cli
+      - ping
+  register: gateway_redis_ping
+  changed_when: false
+  failed_when: false
+
+- name: Discover legacy mixed-case Gateway state keys
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - gitivity-redis
+      - redis-cli
+      - --scan
+      - --pattern
+      - "{{ item }}"
+  loop: "{{ gateway_redis_state_patterns }}"
+  register: gateway_redis_state_scans
+  changed_when: false
+  when:
+    - gateway_redis_target_key_migration_enabled | bool
+    - gateway_redis_ping.rc == 0
+
+- name: Collect legacy mixed-case Gateway state keys
+  ansible.builtin.set_fact:
+    gateway_redis_legacy_keys: >-
+      {{
+        gateway_redis_state_scans.results
+        | default([])
+        | selectattr('stdout_lines', 'defined')
+        | map(attribute='stdout_lines')
+        | flatten
+        | select('match', '^user_state:[^:]*[A-Z][^:]*:')
+        | list
+      }}
+  when:
+    - gateway_redis_target_key_migration_enabled | bool
+    - gateway_redis_ping.rc == 0
+
+- name: Migrate legacy Redis target keys without overwriting canonical state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - gitivity-redis
+      - redis-cli
+      - RENAMENX
+      - "{{ item }}"
+      - >-
+        user_state:{{ item.split(':')[1] | lower }}:{{ item.split(':')[2:] | join(':') }}
+  loop: "{{ gateway_redis_legacy_keys | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: gateway_redis_key_migrations
+  changed_when: gateway_redis_key_migrations.stdout | trim == "1"
+  failed_when:
+    - gateway_redis_key_migrations.rc != 0
+    - "'no such key' not in (gateway_redis_key_migrations.stderr | lower)"
+
 - name: Pull / build Docker images
   ansible.builtin.command:
     cmd: docker compose --env-file .env.docker {{ compose_profiles }} build --pull
@@ -59,3 +180,69 @@
     chdir: "{{ project_dir }}"
   register: compose_up
   changed_when: compose_up.rc == 0
+
+- name: Wait for the Gateway API after rollout
+  ansible.builtin.uri:
+    url: "http://{{ service_bind_ip }}:8100/health"
+    method: GET
+    status_code: 200
+  register: gateway_api_rollout_health
+  until: gateway_api_rollout_health.status == 200
+  retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+
+- name: Wait for the Gateway consumer container to become healthy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{' }}if .State.Health{{ '}}' }}{{ '{{' }}.State.Health.Status{{ '}}' }}{{ '{{' }}else{{ '}}' }}{{ '{{' }}.State.Status{{ '}}' }}{{ '{{' }}end{{ '}}' }}"
+      - gitivity-consumer
+  register: gateway_consumer_health
+  until: gateway_consumer_health.stdout | trim == "healthy"
+  retries: "{{ (gateway_consumer_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+  changed_when: false
+
+- name: Read image IDs used by the Gateway API and consumer
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{' }}.Image{{ '}}' }}"
+      - "{{ item }}"
+  loop:
+    - gitivity-api
+    - gitivity-consumer
+  register: gateway_runtime_image_ids
+  changed_when: false
+
+- name: Require API and consumer to run the same rebuilt image
+  ansible.builtin.assert:
+    that:
+      - gateway_runtime_image_ids.results | map(attribute='stdout') | unique | length == 1
+    fail_msg: >-
+      Gateway API and consumer are not running the same image after rollout.
+
+- name: Verify the RabbitMQ queue has an attached consumer
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - gitivity-rabbitmq
+      - rabbitmqctl
+      - list_queues
+      - --no-table-headers
+      - name
+      - consumers
+  register: gateway_queue_consumers
+  until: >-
+    gateway_queue_consumers.stdout_lines
+    | select('match', '^gateway-iam-provisioning\s+[1-9][0-9]*$')
+    | list
+    | length == 1
+  retries: "{{ (gateway_consumer_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+  changed_when: false

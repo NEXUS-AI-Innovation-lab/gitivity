@@ -1,5 +1,6 @@
 """Main orchestrator for provisioning operations"""
 import asyncio
+import json
 import logging
 import traceback
 import uuid
@@ -129,6 +130,29 @@ class ProvisioningOrchestrator:
                 except Exception as e:
                     logger.warning(f"Failed to check for changes, proceeding: {e}")
 
+                try:
+                    duplicate_operation_id = await self._find_duplicate_pending_update(
+                        message
+                    )
+                    if duplicate_operation_id:
+                        logger.info(
+                            f"Duplicate pending UPDATE detected for {message.user_data.username} "
+                            f"on {message.target_key} - skipping"
+                        )
+                        await self._repo.update_status(
+                            id=operation_id,
+                            status=OperationStatus.SUCCESS,
+                            error_message=(
+                                "Skipped: identical update already pending approval "
+                                f"({duplicate_operation_id})"
+                            ),
+                        )
+                        return operation_id
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to detect duplicate pending UPDATE, proceeding: {e}"
+                    )
+
             # Step 2: Mark as VALIDATED directly (no validation workflow)
             await self._mark_validated(operation_id)
 
@@ -192,6 +216,55 @@ class ProvisioningOrchestrator:
         )
 
         return operation
+
+    @staticmethod
+    def _stable_user_snapshot(user_data: dict) -> str:
+        def normalize(value):
+            if isinstance(value, dict):
+                return {
+                    key: normalize(item)
+                    for key, item in sorted(value.items())
+                }
+            if isinstance(value, list):
+                normalized = [normalize(item) for item in value]
+                return sorted(
+                    normalized,
+                    key=lambda item: json.dumps(
+                        item,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+            return value
+
+        return json.dumps(
+            normalize(user_data),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    async def _find_duplicate_pending_update(
+        self,
+        message: MidPointMessage,
+    ) -> str | None:
+        approval_repo = await self._get_approval_repo()
+        desired_user_data = message.user_data.model_dump(mode="json")
+        desired_snapshot = self._stable_user_snapshot(desired_user_data)
+
+        for pending in await approval_repo.list_all_pending():
+            if pending.get("operation_type") != OperationType.UPDATE_USER.value:
+                continue
+            if pending.get("target_service") != message.target_key:
+                continue
+
+            pending_user_data = pending.get("user_data") or {}
+            if pending_user_data.get("username") != message.user_data.username:
+                continue
+
+            if self._stable_user_snapshot(pending_user_data) == desired_snapshot:
+                return pending.get("operation_id")
+
+        return None
 
     async def _mark_validated(self, operation_id: str) -> None:
         """Mark operation as VALIDATED directly (no validation workflow)"""

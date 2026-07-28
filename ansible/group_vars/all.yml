@@ -7,6 +7,18 @@
 project_dir: /opt/gitivity
 project_repo_src: "{{ playbook_dir | dirname }}"   # local path of the repo
 
+# Stateful rollout controls. Redis target identifiers are canonical lowercase
+# IDs from config/targets.yaml. The migration is safe to run on every deploy:
+# RENAMENX preserves the legacy key when a canonical key already exists.
+gateway_redis_target_key_migration_enabled: true
+gateway_redis_state_patterns:
+  - "user_state:*"
+# Release contract for the incident of 2026-07-28. This deliberately blocks a
+# rollout from a stale controller checkout that would overwrite the VPS hotfix.
+gateway_required_application_markers:
+  - path: app/core/orchestrator.py
+    marker: "Duplicate pending UPDATE detected"
+
 # --- Server IP (used in approval email links and service URLs) ----------------
 # Service ports are bound only on this address, not on every host interface.
 service_bind_ip: "10.10.0.1"
@@ -16,6 +28,8 @@ server_ip: "{{ service_bind_ip }}"
 postgresql_target_host_port: 5433
 # Port publié par la nouvelle cible MongoDB. Le port interne reste 27017.
 mongodb_target_host_port: 27017
+# Port publié par la cible LDAP locale. Le port interne reste 10389.
+ldap_target_host_port: 10389
 
 # --- Profiles -----------------------------------------------------------------
 with_targets: false     # set true to also start LDAP/MySQL/PostgreSQL/MongoDB/Odoo
@@ -70,3 +84,4 @@ old_resource_oid_in_roles: 3447776b-105c-4663-a025-5b27568ee091
 service_wait_timeout: 300
 service_wait_delay: 10
 midpoint_connector_wait_timeout: 120
+gateway_consumer_wait_timeout: 120
