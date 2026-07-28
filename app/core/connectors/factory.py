@@ -2,6 +2,7 @@
 import logging
 from typing import Type
 
+from app.config.target_catalog import TargetDefinition, target_catalog
 from app.core.connectors.base import ProvisioningConnector
 from app.core.connectors.ldap_connector import LDAPConnector
 from app.core.connectors.mysql_connector import MySQLConnector
@@ -31,7 +32,10 @@ class ConnectorFactory:
     }
 
     @classmethod
-    def create(cls, target_service: TargetService) -> ProvisioningConnector:
+    def create(
+        cls,
+        target_service: TargetService | str | TargetDefinition,
+    ) -> ProvisioningConnector:
         """Create a connector instance for the given target service
 
         Args:
@@ -43,14 +47,23 @@ class ConnectorFactory:
         Raises:
             ConnectorNotFoundError: If no connector is registered for the service
         """
-        connector_class = cls._connectors.get(target_service)
+        if isinstance(target_service, TargetDefinition):
+            target = target_service
+        else:
+            try:
+                target = target_catalog.resolve(target_service)
+            except (KeyError, ValueError) as exc:
+                logger.error("No configured target found for: %s", target_service)
+                raise ConnectorNotFoundError(target_service) from exc
+
+        connector_class = cls._connectors.get(target.family)
 
         if connector_class is None:
-            logger.error(f"No connector found for target service: {target_service}")
-            raise ConnectorNotFoundError(target_service)
+            logger.error(f"No connector found for target service: {target.family}")
+            raise ConnectorNotFoundError(target.family)
 
-        logger.debug(f"Creating connector for {target_service}")
-        return connector_class()
+        logger.debug("Creating connector for target %s (%s)", target.id, target.family.value)
+        return connector_class().configure_target(target)
 
     @classmethod
     def register_connector(
@@ -88,7 +101,16 @@ class ConnectorFactory:
         return list(cls._connectors.keys())
 
     @classmethod
-    def is_service_available(cls, target_service: TargetService) -> bool:
+    def get_available_targets(cls) -> list[TargetDefinition]:
+        """Return enabled configured targets backed by a registered connector."""
+        return [
+            target
+            for target in target_catalog.targets()
+            if target.family in cls._connectors
+        ]
+
+    @classmethod
+    def is_service_available(cls, target_service: TargetService | str) -> bool:
         """Check if a connector is available for the target service
 
         Args:
@@ -97,11 +119,15 @@ class ConnectorFactory:
         Returns:
             True if a connector is registered, False otherwise
         """
-        return target_service in cls._connectors
+        try:
+            target = target_catalog.resolve(target_service)
+        except (KeyError, ValueError):
+            return False
+        return target.family in cls._connectors
 
 
 # Convenience function for creating connectors
-def get_connector(target_service: TargetService) -> ProvisioningConnector:
+def get_connector(target_service: TargetService | str) -> ProvisioningConnector:
     """Get a connector instance for the given target service
 
     This is a convenience wrapper around ConnectorFactory.create()

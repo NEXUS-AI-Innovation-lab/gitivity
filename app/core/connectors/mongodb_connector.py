@@ -32,13 +32,21 @@ class MongoDBConnector(ProvisioningConnector):
     async def connect(self) -> None:
         try:
             self._client = MongoClient(
-                host=settings.MONGODB_HOST,
-                port=settings.MONGODB_PORT,
-                username=settings.MONGODB_USER,
-                password=settings.MONGODB_PASSWORD,
-                authSource=settings.MONGODB_AUTH_SOURCE,
-                serverSelectionTimeoutMS=settings.MONGODB_CONNECT_TIMEOUT * 1000,
-                connectTimeoutMS=settings.MONGODB_CONNECT_TIMEOUT * 1000,
+                host=self.target_setting("host", settings.MONGODB_HOST),
+                port=self.target_setting("port", settings.MONGODB_PORT),
+                username=self.target_setting("user", settings.MONGODB_USER),
+                password=self.target_setting("password", settings.MONGODB_PASSWORD),
+                authSource=self.target_setting(
+                    "auth_source", settings.MONGODB_AUTH_SOURCE
+                ),
+                serverSelectionTimeoutMS=self.target_setting(
+                    "connect_timeout", settings.MONGODB_CONNECT_TIMEOUT
+                )
+                * 1000,
+                connectTimeoutMS=self.target_setting(
+                    "connect_timeout", settings.MONGODB_CONNECT_TIMEOUT
+                )
+                * 1000,
             )
             await asyncio.to_thread(self._client.admin.command, "ping")
             logger.info("MongoDB connection established")
@@ -67,7 +75,9 @@ class MongoDBConnector(ProvisioningConnector):
             return False
 
     def _database_name(self, attributes: dict[str, Any] | None) -> str:
-        return (attributes or {}).get("mongodbDatabase") or settings.MONGODB_DATABASE
+        return (attributes or {}).get("mongodbDatabase") or self.target_setting(
+            "database", settings.MONGODB_DATABASE
+        )
 
     def _normalize_roles(
         self,

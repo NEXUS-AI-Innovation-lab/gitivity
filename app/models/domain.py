@@ -25,9 +25,18 @@ class MidPointMessage(BaseModel):
     request_id: str = Field(..., description="Unique request ID from MidPoint")
     operation_type: OperationType
     target_service: TargetService
+    target_id: str | None = Field(
+        default=None,
+        description="Configured target instance ID; defaults to the connector family",
+    )
     user_data: UserData
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def target_key(self) -> str:
+        """Stable key used for routing and per-target state."""
+        return self.target_id or self.target_service.value.lower()
 
 
 class ProvisioningRequest(BaseModel):

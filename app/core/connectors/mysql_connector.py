@@ -38,12 +38,14 @@ class MySQLConnector(ProvisioningConnector):
         """Establish connection pool to MySQL"""
         try:
             self._pool = await aiomysql.create_pool(
-                host=settings.MYSQL_HOST,
-                port=settings.MYSQL_PORT,
-                user=settings.MYSQL_USER,
-                password=settings.MYSQL_PASSWORD,
-                db=settings.MYSQL_DATABASE,
-                connect_timeout=settings.MYSQL_CONNECT_TIMEOUT,
+                host=self.target_setting("host", settings.MYSQL_HOST),
+                port=self.target_setting("port", settings.MYSQL_PORT),
+                user=self.target_setting("user", settings.MYSQL_USER),
+                password=self.target_setting("password", settings.MYSQL_PASSWORD),
+                db=self.target_setting("database", settings.MYSQL_DATABASE),
+                connect_timeout=self.target_setting(
+                    "connect_timeout", settings.MYSQL_CONNECT_TIMEOUT
+                ),
                 autocommit=True,
                 minsize=1,
                 maxsize=5,

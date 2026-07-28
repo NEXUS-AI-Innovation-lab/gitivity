@@ -1,0 +1,90 @@
+version: 1
+
+# Catalogue déclaratif des cibles de provisioning.
+#
+# Ajouter une nouvelle INSTANCE d'un type supporté consiste à dupliquer une
+# entrée, changer son id/aliases et ses paramètres de connexion. Les valeurs
+# ${VAR:-default} sont résolues depuis l'environnement au chargement.
+targets:
+  - id: mysql
+    type: mysql
+    display_name: MySQL
+    enabled: true
+    aliases: [mysql, sql, mariadb, mysql1, mysql2, mysql3, mysql4]
+    connection:
+      host: ${MYSQL_HOST:-localhost}
+      port: ${MYSQL_PORT:-3306}
+      user: ${MYSQL_USER:-root}
+      password: ${MYSQL_PASSWORD:-}
+      database: ${MYSQL_DATABASE:-mysql}
+      connect_timeout: ${MYSQL_CONNECT_TIMEOUT:-10}
+    routing:
+      entitlement_attributes: [mysqlProfile, mysqlGrants, mysqlRole]
+
+  - id: postgresql
+    type: postgresql
+    display_name: PostgreSQL
+    enabled: true
+    aliases: [postgresql, postgres, pg, postgresql1, postgresql2, postgresql3, postgresql4, postgres1, postgres2, postgres3, postgres4]
+    connection:
+      host: ${POSTGRESQL_HOST:-localhost}
+      port: ${POSTGRESQL_PORT:-5432}
+      user: ${POSTGRESQL_USER:-postgres}
+      password: ${POSTGRESQL_PASSWORD:-}
+      database: ${POSTGRESQL_DATABASE:-postgres}
+      connect_timeout: ${POSTGRESQL_CONNECT_TIMEOUT:-10}
+    routing:
+      entitlement_attributes: [postgresqlProfile, postgresqlGrants, postgresqlRole]
+
+  - id: mongodb
+    type: mongodb
+    display_name: MongoDB
+    enabled: true
+    aliases: [mongodb, mongo]
+    connection:
+      host: ${MONGODB_HOST:-localhost}
+      port: ${MONGODB_PORT:-27017}
+      user: ${MONGODB_USER:-root}
+      password: ${MONGODB_PASSWORD:-}
+      database: ${MONGODB_DATABASE:-target_db}
+      auth_source: ${MONGODB_AUTH_SOURCE:-admin}
+      connect_timeout: ${MONGODB_CONNECT_TIMEOUT:-10}
+    routing:
+      entitlement_attributes: [mongodbRoles, mongodbRole]
+    entitlements:
+      provider: mongodb_roles
+      identifier: "{role}@{database}"
+      fallback: [read, readWrite, dbAdmin, dbOwner]
+
+  - id: ldap
+    type: ldap
+    display_name: LDAP
+    enabled: true
+    aliases: [ldap, ldap1, ldap2, ldap3, ldap4, activedirectory, ad]
+    connection:
+      host: ${LDAP_HOST:-localhost}
+      port: ${LDAP_PORT:-10389}
+      use_ssl: ${LDAP_USE_SSL:-false}
+      bind_dn: ${LDAP_BIND_DN:-uid=admin,ou=system}
+      bind_password: ${LDAP_BIND_PASSWORD:-secret}
+      base_dn: ${LDAP_BASE_DN:-dc=openmicroscopy,dc=org}
+      user_object_class: ${LDAP_USER_OBJECT_CLASS:-inetOrgPerson}
+      connect_timeout: ${LDAP_CONNECT_TIMEOUT:-10}
+    routing:
+      entitlement_attributes: [ldapGroups, ldapGroup]
+      delete_mode: update
+
+  - id: odoo
+    type: odoo
+    display_name: Odoo
+    enabled: true
+    aliases: [odoo, odoo1, odoo2, odoo3, odoo4, erp]
+    connection:
+      url: ${ODOO_URL:-http://localhost:8069}
+      database: ${ODOO_DB:-odoo}
+      username: ${ODOO_USERNAME:-admin}
+      password: ${ODOO_PASSWORD:-admin}
+      timeout: ${ODOO_TIMEOUT:-30}
+    routing:
+      entitlement_attributes: [odooGroups, odooGroup]
+

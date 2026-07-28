@@ -7,12 +7,19 @@ Supporte aussi les entitlements (groupes LDAP, profils SQL et rôles MongoDB)
 from flask import Flask, request, jsonify
 import json
 import os
+import re
 from datetime import datetime
+import yaml
 
 app = Flask(__name__)
 
 # Charger la configuration
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
+TARGET_CATALOG_FILE = os.getenv(
+    'TARGET_CATALOG_PATH',
+    os.path.join(os.path.dirname(__file__), 'config', 'targets.yaml'),
+)
+ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 def load_config():
     """Charge la configuration depuis config.json"""
@@ -22,6 +29,37 @@ def load_config():
     except Exception as e:
         print(f"Erreur chargement config: {e}")
         return {}
+
+
+def load_targets():
+    """Load targets.yaml and resolve its ${VAR:-default} placeholders."""
+    def interpolate(value):
+        if isinstance(value, dict):
+            return {key: interpolate(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [interpolate(item) for item in value]
+        if not isinstance(value, str):
+            return value
+        resolved = ENV_PATTERN.sub(
+            lambda match: os.getenv(match.group(1), match.group(2) or ''),
+            value,
+        )
+        return yaml.safe_load(resolved) if ENV_PATTERN.fullmatch(value) and resolved else resolved
+
+    with open(TARGET_CATALOG_FILE, 'r', encoding='utf-8') as stream:
+        document = interpolate(yaml.safe_load(stream) or {})
+    return [target for target in document.get('targets', []) if target.get('enabled', True)]
+
+
+def get_target(target_id=None, target_type=None):
+    """Resolve a target instance, falling back to the first target of its type."""
+    targets = load_targets()
+    if target_id:
+        normalized = target_id.lower()
+        for target in targets:
+            if normalized == target['id'] or normalized in target.get('aliases', []):
+                return target
+    return next((target for target in targets if target.get('type') == target_type), None)
 
 def get_ldap_groups():
     """Récupère les groupes LDAP depuis tous les serveurs LDAP configurés.
@@ -98,25 +136,34 @@ def _test_groups(domain):
     ]
 
 
-def get_mongodb_roles():
+def get_mongodb_roles(target_id=None):
     """Discover built-in and custom roles from the configured MongoDB database.
 
     The static configuration is only a resilience fallback, so MidPoint can
     still load the resource schema while MongoDB is restarting.
     """
-    config = load_config()
-    fallback = config.get('entitlements', {}).get('mongodb', {}).get('roles', [])
-    database = os.getenv('MONGODB_DATABASE', 'target_db')
+    target = get_target(target_id, 'mongodb') or {}
+    connection = target.get('connection', {})
+    entitlements = target.get('entitlements', {})
+    database = connection.get('database', 'target_db')
+    fallback = [
+        {
+            'roleName': role,
+            'database': database,
+            'description': 'Rôle MongoDB de secours',
+        }
+        for role in entitlements.get('fallback', [])
+    ]
 
     try:
         from pymongo import MongoClient
 
         client = MongoClient(
-            host=os.getenv('MONGODB_HOST', 'localhost'),
-            port=int(os.getenv('MONGODB_PORT', '27017')),
-            username=os.getenv('MONGODB_USER', 'root'),
-            password=os.getenv('MONGODB_PASSWORD', ''),
-            authSource=os.getenv('MONGODB_AUTH_SOURCE', 'admin'),
+            host=connection.get('host', 'localhost'),
+            port=int(connection.get('port', 27017)),
+            username=connection.get('user', 'root'),
+            password=connection.get('password', ''),
+            authSource=connection.get('auth_source', 'admin'),
             serverSelectionTimeoutMS=5000,
         )
         client.admin.command('ping')
@@ -223,6 +270,20 @@ def health():
     }), 200
 
 
+@app.route('/targets', methods=['GET'])
+def list_targets():
+    """Expose non-secret target metadata for diagnostics and MidPoint tooling."""
+    return jsonify([
+        {
+            'id': target['id'],
+            'type': target['type'],
+            'displayName': target.get('display_name', target['id']),
+            'aliases': target.get('aliases', []),
+        }
+        for target in load_targets()
+    ]), 200
+
+
 # ============================================================
 # ENDPOINTS ENTITLEMENTS
 # ============================================================
@@ -291,7 +352,7 @@ def get_entitlements_mysql_profiles():
 def get_entitlements_mongodb_roles():
     """Return roles discoverable on the target MongoDB database."""
     try:
-        roles = get_mongodb_roles()
+        roles = get_mongodb_roles(request.args.get('target'))
         print_separator()
         print(f"ENTITLEMENTS MongoDB - {len(roles)} rôles")
         print_separator()

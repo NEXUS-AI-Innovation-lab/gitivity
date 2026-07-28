@@ -74,7 +74,7 @@ class ProvisioningOrchestrator:
                 extra={
                     "operation_id": operation_id,
                     "operation_type": message.operation_type.value,
-                    "target_service": message.target_service.value,
+                    "target_service": message.target_key,
                 },
             )
 
@@ -83,7 +83,7 @@ class ProvisioningOrchestrator:
             if message.operation_type in (OperationType.UPDATE_USER, OperationType.DELETE_USER):
                 approval_repo = await self._get_approval_repo()
                 username = message.user_data.username
-                target_svc = message.target_service.value
+                target_svc = message.target_key
 
                 if await approval_repo.check_rejected_create(username, target_svc):
                     if message.operation_type == OperationType.DELETE_USER:
@@ -111,7 +111,7 @@ class ProvisioningOrchestrator:
                 try:
                     approval_repo = await self._get_approval_repo()
                     username = message.user_data.username
-                    target_svc = message.target_service.value
+                    target_svc = message.target_key
                     old_state = await approval_repo.get_user_state(username, target_svc)
                     if old_state:
                         new_state = message.user_data.model_dump(mode="json")
@@ -188,7 +188,7 @@ class ProvisioningOrchestrator:
         await self._audit.log_operation_created(
             operation_id=operation.id,
             midpoint_request_id=message.request_id,
-            target_service=message.target_service.value,
+            target_service=message.target_key,
         )
 
         return operation
@@ -235,7 +235,7 @@ class ProvisioningOrchestrator:
             await approval_repo.add_pending_approval(
                 operation_id,
                 {
-                    "target_service": message.target_service.value,
+                    "target_service": message.target_key,
                     "operation_type": message.operation_type.value,
                     "user_data": message.user_data.model_dump(mode="json"),
                     "midpoint_message": message.model_dump(mode="json"),
@@ -251,7 +251,7 @@ class ProvisioningOrchestrator:
                 request_id=approval_request_id,
                 operation_data={
                     "operation_type": message.operation_type.value,
-                    "target_service": message.target_service.value,
+                    "target_service": message.target_key,
                     "user_data": message.user_data.model_dump(mode="json"),
                 },
             )
@@ -507,13 +507,14 @@ class ProvisioningOrchestrator:
                 # Reconstruct MidPointMessage and continue to provisioning
                 message = await self._reconstruct_midpoint_message(operation)
                 await self._provision_to_target(operation_id, message)
+                target_key = message.target_key
 
                 # Clear rejected CREATE marker if this CREATE succeeded
                 if operation.operation_type == "CREATE_USER":
                     username = (operation.user_data or {}).get("username", "")
                     if username:
                         await approval_repo.clear_rejected_create(
-                            username, operation.target_service
+                            username, target_key
                         )
 
                 # Snapshot the provisioned state in Redis so that the next UPDATE
@@ -523,7 +524,7 @@ class ProvisioningOrchestrator:
                     if username:
                         await approval_repo.store_user_state(
                             username,
-                            operation.target_service,
+                            target_key,
                             operation.user_data or {},
                         )
                 except Exception as e:
@@ -572,8 +573,12 @@ class ProvisioningOrchestrator:
                 if operation.operation_type == "CREATE_USER":
                     username = (operation.user_data or {}).get("username", "")
                     if username:
+                        target_key = (
+                            (operation.original_message or {}).get("target_id")
+                            or operation.target_service.lower()
+                        )
                         await approval_repo.store_rejected_create(
-                            username, operation.target_service, operation_id, reason
+                            username, target_key, operation_id, reason
                         )
                     # Roll back the MidPoint role assignment so IAM stays in sync with reality
                     await self._remove_midpoint_role(operation)
@@ -648,11 +653,11 @@ class ProvisioningOrchestrator:
 
         await self._audit.log_provisioning_started(
             operation_id=operation_id,
-            target_service=message.target_service.value,
+            target_service=message.target_key,
         )
 
         # Get connector for target service
-        connector = ConnectorFactory.create(message.target_service)
+        connector = ConnectorFactory.create(message.target_id or message.target_service)
 
         try:
             async with connector:
@@ -673,7 +678,7 @@ class ProvisioningOrchestrator:
 
             await self._audit.log_provisioning_completed(
                 operation_id=operation_id,
-                target_service=message.target_service.value,
+                target_service=message.target_key,
                 service_user_id=result.service_user_id,
                 details=result.details,
             )
@@ -743,7 +748,10 @@ class ProvisioningOrchestrator:
         from app.services.midpoint_client import midpoint_client
 
         username = (operation.user_data or {}).get("username", "")
-        target_service = operation.target_service  # e.g. "MYSQL", "ODOO"
+        target_service = (
+            (operation.original_message or {}).get("target_id")
+            or operation.target_service
+        )
 
         if not username:
             logger.warning("Cannot remove MidPoint role: no username")
@@ -899,6 +907,7 @@ class ProvisioningOrchestrator:
             request_id=operation.midpoint_request_id or operation.id,
             operation_type=OperationType(operation.operation_type),
             target_service=TargetService(operation.target_service),
+            target_id=operation.original_message.get("target_id"),
             user_data=operation.user_data,
             metadata=operation.original_message.get("metadata", {}),
         )

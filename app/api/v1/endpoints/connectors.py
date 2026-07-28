@@ -6,10 +6,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.config.settings import settings
+from app.config.target_catalog import TargetDefinition, target_catalog
 from app.core.connectors.factory import ConnectorFactory
 from app.services.midpoint_client import midpoint_client
-from app.utils.enums import TargetService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/connectors", tags=["connectors"])
@@ -70,47 +69,9 @@ class ConnectorTestResponse(BaseModel):
 # Helper Functions
 # ============================================================================
 
-def get_gateway_connector_config(service: TargetService) -> dict[str, Any]:
-    """Get current configuration for a Gateway connector (without sensitive data).
-
-    Passwords are intentionally excluded — they are read from settings but never returned.
-    """
-    if service == TargetService.MYSQL:
-        return {
-            "host": settings.MYSQL_HOST,
-            "port": settings.MYSQL_PORT,
-            "user": settings.MYSQL_USER,
-            "database": settings.MYSQL_DATABASE,
-        }
-    elif service == TargetService.POSTGRESQL:
-        return {
-            "host": settings.POSTGRESQL_HOST,
-            "port": settings.POSTGRESQL_PORT,
-            "user": settings.POSTGRESQL_USER,
-            "database": settings.POSTGRESQL_DATABASE,
-        }
-    elif service == TargetService.ODOO:
-        return {
-            "url": settings.ODOO_URL,
-            "database": settings.ODOO_DB,
-            "user": settings.ODOO_USERNAME,
-        }
-    elif service == TargetService.LDAP:
-        return {
-            "host": settings.LDAP_HOST,
-            "port": settings.LDAP_PORT,
-            "use_ssl": settings.LDAP_USE_SSL,
-            "base_dn": settings.LDAP_BASE_DN,
-        }
-    elif service == TargetService.MONGODB:
-        return {
-            "host": settings.MONGODB_HOST,
-            "port": settings.MONGODB_PORT,
-            "user": settings.MONGODB_USER,
-            "database": settings.MONGODB_DATABASE,
-            "auth_source": settings.MONGODB_AUTH_SOURCE,
-        }
-    return {}
+def get_gateway_connector_config(target: TargetDefinition) -> dict[str, Any]:
+    """Return the declarative connection settings without secrets."""
+    return target.public_connection()
 
 
 # ============================================================================
@@ -125,10 +86,10 @@ async def list_all_connectors():
     midpoint_available = False
 
     # Get Gateway connectors — each one is connect()-checked then closed
-    available_services = ConnectorFactory.get_available_services()
-    for service in available_services:
+    available_targets = ConnectorFactory.get_available_targets()
+    for target in available_targets:
         try:
-            connector = ConnectorFactory.create(service)
+            connector = ConnectorFactory.create(target)
             try:
                 await connector.connect()
                 is_healthy = await connector.health_check()
@@ -148,11 +109,11 @@ async def list_all_connectors():
             message = f"Failed to create connector: {str(e)}"
 
         gateway_connectors.append(ConnectorStatus(
-            name=service.value,
+            name=target.id,
             type="gateway",
             status=status_str,
             message=message,
-            config=get_gateway_connector_config(service)
+            config=get_gateway_connector_config(target)
         ))
 
     # Get MidPoint connectors
@@ -209,11 +170,11 @@ async def list_all_connectors():
 async def list_gateway_connectors():
     """List all Gateway connectors"""
     connectors = []
-    available_services = ConnectorFactory.get_available_services()
+    available_targets = ConnectorFactory.get_available_targets()
 
-    for service in available_services:
+    for target in available_targets:
         try:
-            connector = ConnectorFactory.create(service)
+            connector = ConnectorFactory.create(target)
             try:
                 await connector.connect()
                 is_healthy = await connector.health_check()
@@ -232,11 +193,11 @@ async def list_gateway_connectors():
             message = f"Failed to create connector: {str(e)}"
 
         connectors.append(ConnectorStatus(
-            name=service.value,
+            name=target.id,
             type="gateway",
             status=status_str,
             message=message,
-            config=get_gateway_connector_config(service)
+            config=get_gateway_connector_config(target)
         ))
 
     return connectors
@@ -304,21 +265,21 @@ async def list_midpoint_connectors():
 async def get_gateway_connector(connector_name: str):
     """Get details of a specific Gateway connector"""
     try:
-        service = TargetService(connector_name.upper())
-    except ValueError:
+        target = target_catalog.resolve(connector_name)
+    except (KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Gateway connector '{connector_name}' not found"
         )
 
-    if not ConnectorFactory.is_service_available(service):
+    if not ConnectorFactory.is_service_available(target.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Gateway connector '{connector_name}' is not available"
         )
 
     try:
-        connector = ConnectorFactory.create(service)
+        connector = ConnectorFactory.create(target)
         try:
             await connector.connect()
             is_healthy = await connector.health_check()
@@ -337,11 +298,11 @@ async def get_gateway_connector(connector_name: str):
         message = f"Failed to create connector: {str(e)}"
 
     return ConnectorStatus(
-        name=service.value,
+        name=target.id,
         type="gateway",
         status=status_str,
         message=message,
-        config=get_gateway_connector_config(service)
+        config=get_gateway_connector_config(target)
     )
 
 
@@ -399,14 +360,14 @@ async def get_midpoint_connector(oid: str):
 async def test_gateway_connector(connector_name: str):
     """Test connection to a Gateway connector"""
     try:
-        service = TargetService(connector_name.upper())
-    except ValueError:
+        target = target_catalog.resolve(connector_name)
+    except (KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Gateway connector '{connector_name}' not found"
         )
 
-    if not ConnectorFactory.is_service_available(service):
+    if not ConnectorFactory.is_service_available(target.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Gateway connector '{connector_name}' is not available"
@@ -415,7 +376,7 @@ async def test_gateway_connector(connector_name: str):
     start_time = time.perf_counter()
 
     try:
-        connector = ConnectorFactory.create(service)
+        connector = ConnectorFactory.create(target)
         try:
             await connector.connect()
             is_healthy = await connector.health_check()
@@ -423,7 +384,7 @@ async def test_gateway_connector(connector_name: str):
 
             if is_healthy:
                 return ConnectorTestResponse(
-                    name=service.value,
+                    name=target.id,
                     type="gateway",
                     success=True,
                     message="Connection successful",
@@ -431,7 +392,7 @@ async def test_gateway_connector(connector_name: str):
                 )
             else:
                 return ConnectorTestResponse(
-                    name=service.value,
+                    name=target.id,
                     type="gateway",
                     success=False,
                     message="Health check failed",
@@ -445,7 +406,7 @@ async def test_gateway_connector(connector_name: str):
     except Exception as e:
         latency_ms = (time.perf_counter() - start_time) * 1000
         return ConnectorTestResponse(
-            name=service.value,
+            name=target.id,
             type="gateway",
             success=False,
             message=f"Connection failed: {str(e)}",
@@ -509,70 +470,29 @@ async def update_gateway_connector_config(connector_name: str, config: Connector
     """Update Gateway connector configuration (runtime only)
 
     Note: Changes are in memory only and won't persist after restart.
-    Update .env file for permanent changes.
+    Update config/targets.yaml for permanent changes.
     """
     try:
-        service = TargetService(connector_name.upper())
-    except ValueError:
+        target = target_catalog.resolve(connector_name)
+    except (KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Gateway connector '{connector_name}' not found"
         )
 
-    if not ConnectorFactory.is_service_available(service):
+    if not ConnectorFactory.is_service_available(target.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Gateway connector '{connector_name}' is not available"
         )
 
-    # Update settings in memory
-    if service == TargetService.MYSQL:
-        if config.host:
-            settings.MYSQL_HOST = config.host
-        if config.port:
-            settings.MYSQL_PORT = config.port
-        if config.user:
-            settings.MYSQL_USER = config.user
-        if config.password:
-            settings.MYSQL_PASSWORD = config.password
-        if config.database:
-            settings.MYSQL_DATABASE = config.database
-    elif service == TargetService.POSTGRESQL:
-        if config.host:
-            settings.POSTGRESQL_HOST = config.host
-        if config.port:
-            settings.POSTGRESQL_PORT = config.port
-        if config.user:
-            settings.POSTGRESQL_USER = config.user
-        if config.password:
-            settings.POSTGRESQL_PASSWORD = config.password
-        if config.database:
-            settings.POSTGRESQL_DATABASE = config.database
-    elif service == TargetService.ODOO:
-        if config.url:
-            settings.ODOO_URL = config.url
-        if config.database:
-            settings.ODOO_DB = config.database
-        if config.user:
-            settings.ODOO_USERNAME = config.user
-        if config.password:
-            settings.ODOO_PASSWORD = config.password
-    elif service == TargetService.LDAP:
-        if config.host:
-            settings.LDAP_HOST = config.host
-        if config.port:
-            settings.LDAP_PORT = config.port
-    elif service == TargetService.MONGODB:
-        if config.host:
-            settings.MONGODB_HOST = config.host
-        if config.port:
-            settings.MONGODB_PORT = config.port
-        if config.user:
-            settings.MONGODB_USER = config.user
-        if config.password:
-            settings.MONGODB_PASSWORD = config.password
-        if config.database:
-            settings.MONGODB_DATABASE = config.database
+    for key, value in config.model_dump(exclude_none=True).items():
+        connection_key = (
+            "username"
+            if key == "user" and "username" in target.connection
+            else key
+        )
+        target.connection[connection_key] = value
 
     logger.info(f"Updated configuration for Gateway connector: {connector_name}")
 

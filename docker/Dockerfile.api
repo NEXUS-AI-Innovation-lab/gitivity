@@ -29,6 +29,7 @@ COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY prisma/ ./prisma/
 COPY data/ ./data/
+COPY config/ ./config/
 
 # Generate Prisma client (binaries cached in /app/.prisma-cache via PRISMA_BINARY_CACHE_DIR)
 RUN prisma generate

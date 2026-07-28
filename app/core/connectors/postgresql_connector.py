@@ -41,12 +41,14 @@ class PostgreSQLConnector(ProvisioningConnector):
         """Establish connection pool to PostgreSQL"""
         try:
             self._pool = await asyncpg.create_pool(
-                host=settings.POSTGRESQL_HOST,
-                port=settings.POSTGRESQL_PORT,
-                user=settings.POSTGRESQL_USER,
-                password=settings.POSTGRESQL_PASSWORD,
-                database=settings.POSTGRESQL_DATABASE,
-                timeout=settings.POSTGRESQL_CONNECT_TIMEOUT,
+                host=self.target_setting("host", settings.POSTGRESQL_HOST),
+                port=self.target_setting("port", settings.POSTGRESQL_PORT),
+                user=self.target_setting("user", settings.POSTGRESQL_USER),
+                password=self.target_setting("password", settings.POSTGRESQL_PASSWORD),
+                database=self.target_setting("database", settings.POSTGRESQL_DATABASE),
+                timeout=self.target_setting(
+                    "connect_timeout", settings.POSTGRESQL_CONNECT_TIMEOUT
+                ),
                 min_size=1,
                 max_size=5,
             )
@@ -543,7 +545,9 @@ class PostgreSQLConnector(ProvisioningConnector):
 
                 # Step 6: Reassign owned objects to admin user
                 try:
-                    admin_user = settings.POSTGRESQL_USER.replace('"', '""')
+                    admin_user = str(
+                        self.target_setting("user", settings.POSTGRESQL_USER)
+                    ).replace('"', '""')
                     await conn.execute(
                         f'REASSIGN OWNED BY "{escaped_username}" TO "{admin_user}"'
                     )

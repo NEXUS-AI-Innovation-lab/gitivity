@@ -69,7 +69,7 @@ class OdooConnector(ProvisioningConnector):
     async def connect(self) -> None:
         """Establish connection to Odoo via XML-RPC"""
         try:
-            url = settings.ODOO_URL.rstrip("/")
+            url = str(self.target_setting("url", settings.ODOO_URL)).rstrip("/")
 
             # Create XML-RPC proxies
             self._common = xmlrpc.client.ServerProxy(
@@ -87,9 +87,9 @@ class OdooConnector(ProvisioningConnector):
                 self._executor,
                 partial(
                     self._common.authenticate,
-                    settings.ODOO_DB,
-                    settings.ODOO_USERNAME,
-                    settings.ODOO_PASSWORD,
+                    self.target_setting("database", settings.ODOO_DB),
+                    self.target_setting("username", settings.ODOO_USERNAME),
+                    self.target_setting("password", settings.ODOO_PASSWORD),
                     {},
                 ),
             )
@@ -209,9 +209,9 @@ class OdooConnector(ProvisioningConnector):
             self._executor,
             partial(
                 self._models.execute_kw,
-                settings.ODOO_DB,
+                self.target_setting("database", settings.ODOO_DB),
                 self._uid,
-                settings.ODOO_PASSWORD,
+                self.target_setting("password", settings.ODOO_PASSWORD),
                 model,
                 method,
                 args,

@@ -46,6 +46,11 @@ cp .env.example .env
 # Éditer .env avec votre configuration
 ```
 
+Les bases cibles sont déclarées dans
+[`config/targets.yaml`](config/targets.yaml). Une nouvelle instance d'un type
+supporté s'ajoute en YAML, sans modifier le code. Voir le
+[guide du catalogue modulaire](docs/TARGET_CATALOG.md).
+
 ### 3. Base de données
 
 ```bash
@@ -194,7 +199,8 @@ Voir `.env.example` pour la liste complète.
 
 **operation_type** : `CREATE_USER`, `UPDATE_USER`, `DELETE_USER`, `CREATE_ROLE`, etc.
 
-**target_service** : `MYSQL`, `POSTGRESQL`, `MONGODB`, `ODOO`, `LDAP`
+**target_service** : identifiant ou alias déclaré dans `config/targets.yaml`
+(`mysql`, `postgresql`, `mongodb`, `odoo`, `ldap`, etc.).
 
 Le guide technique qui retrace toutes les modifications nécessaires à
 l'intégration de MongoDB (Python, RabbitMQ, ConnId, MidPoint, Docker, Ansible et

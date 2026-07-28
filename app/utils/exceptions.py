@@ -79,11 +79,16 @@ class ProvisioningError(GatewayIAMError):
 class ConnectorNotFoundError(GatewayIAMError):
     """Raised when no connector is found for a target service"""
 
-    def __init__(self, target_service: TargetService) -> None:
+    def __init__(self, target_service: TargetService | str) -> None:
         self.target_service = target_service
+        value = (
+            target_service.value
+            if isinstance(target_service, TargetService)
+            else str(target_service)
+        )
         super().__init__(
             message=f"No connector found for target service: {target_service}",
-            details={"target_service": target_service.value},
+            details={"target_service": value},
         )
 
 

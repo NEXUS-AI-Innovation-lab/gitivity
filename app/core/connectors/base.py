@@ -1,9 +1,12 @@
 """Abstract base class for provisioning connectors"""
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models.domain import ProvisioningResult
 from app.utils.enums import TargetService
+
+if TYPE_CHECKING:
+    from app.config.target_catalog import TargetDefinition
 
 
 class ProvisioningConnector(ABC):
@@ -13,10 +16,33 @@ class ProvisioningConnector(ABC):
     this interface to handle user provisioning operations.
     """
 
+    _target_definition: "TargetDefinition | None" = None
+
+    def configure_target(self, target: "TargetDefinition") -> "ProvisioningConnector":
+        """Bind this connector instance to a catalogue target."""
+        self._target_definition = target
+        return self
+
+    @property
+    def target_id(self) -> str:
+        """Configured instance identifier, falling back to the connector family."""
+        if self._target_definition:
+            return self._target_definition.id
+        return self.service_name.value.lower()
+
+    def target_setting(self, key: str, fallback: Any = None) -> Any:
+        """Read a connection/provisioning value from the bound target."""
+        if self._target_definition:
+            if key in self._target_definition.connection:
+                return self._target_definition.connection[key]
+            if key in self._target_definition.provisioning:
+                return self._target_definition.provisioning[key]
+        return fallback
+
     @property
     @abstractmethod
     def service_name(self) -> TargetService:
-        """Return the target service this connector handles"""
+        """Return the connector family persisted by the legacy Prisma enum."""
         ...
 
     @abstractmethod

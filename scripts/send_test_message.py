@@ -89,7 +89,8 @@ def generate_message(service: str, action: str) -> dict:
     return {
         "request_id": request_id,
         "operation_type": operation_type,
-        "target_service": service.upper(),
+        # May be a target ID or any alias declared in config/targets.yaml.
+        "target_service": service,
         "user_data": base_user_data,
         "metadata": {
             "source": "test_script",
@@ -157,8 +158,7 @@ Examples:
 
     parser.add_argument(
         "--service",
-        choices=["mysql", "postgresql", "odoo", "mongodb"],
-        help="Target service for generated message",
+        help="Target ID or alias from config/targets.yaml",
     )
     parser.add_argument(
         "--action",

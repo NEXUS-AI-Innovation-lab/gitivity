@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Gateway IAM Provisioning"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    TARGET_CATALOG_PATH: str = "config/targets.yaml"
 
     # Database
     DATABASE_URL: str

@@ -78,6 +78,7 @@ services:
       - "${SERVICE_BIND_IP:-10.10.0.1}:8100:8100"
     volumes:
       - ./data:/app/data
+      - ./config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,6 +103,7 @@ services:
     command: ["consumer"]
     volumes:
       - ./data:/app/data
+      - ./config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,6 +127,7 @@ services:
       dockerfile: docker/Dockerfile.gateway-http
     container_name: gitivity-http
     environment:
+      TARGET_CATALOG_PATH: /app/config/targets.yaml
       LDAP_HOST: ldap
       LDAP_PORT: 10389
       MONGODB_HOST: mongodb-target
@@ -133,6 +136,8 @@ services:
       MONGODB_PASSWORD: mongodb_root_secret
       MONGODB_DATABASE: target_db
       MONGODB_AUTH_SOURCE: admin
+    volumes:
+      - ./config:/app/config:ro
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:5100:5100"
     healthcheck:

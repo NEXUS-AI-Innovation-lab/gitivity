@@ -10,11 +10,12 @@ from typing import Any
 from aiokafka import AIOKafkaConsumer
 
 from app.config.settings import settings
+from app.config.target_catalog import target_catalog
 from app.core.broker.base import BrokerConsumer
 from app.core.orchestrator import ProvisioningOrchestrator
 from app.core.retry_manager import RetryManager
 from app.models.domain import MidPointMessage, UserData
-from app.utils.enums import OperationType, TargetService
+from app.utils.enums import OperationType
 from app.utils.exceptions import MessageParsingError
 
 logger = logging.getLogger(__name__)
@@ -186,8 +187,8 @@ class KafkaConsumer(BrokerConsumer):
                 )
 
             try:
-                target_service = TargetService(target_service_str.upper())
-            except ValueError:
+                target = target_catalog.resolve(target_service_str)
+            except (KeyError, ValueError):
                 raise MessageParsingError(
                     error_message=f"Invalid target_service: {target_service_str}"
                 )
@@ -206,7 +207,8 @@ class KafkaConsumer(BrokerConsumer):
             return MidPointMessage(
                 request_id=request_id,
                 operation_type=operation_type,
-                target_service=target_service,
+                target_service=target.family,
+                target_id=target.id,
                 user_data=user_data,
                 metadata=data.get("metadata", {}),
             )

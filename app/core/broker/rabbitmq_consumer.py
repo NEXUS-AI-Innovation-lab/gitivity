@@ -9,24 +9,25 @@ import logging
 import secrets
 import string
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
 
 from app.config.settings import settings
+from app.config.target_catalog import TargetDefinition, target_catalog
 from app.core.broker.base import BrokerConsumer
 from app.core.orchestrator import ProvisioningOrchestrator
 from app.core.retry_manager import RetryManager
 from app.models.domain import MidPointMessage, UserData
-from app.utils.enums import OperationType, TargetService
+from app.utils.enums import OperationType
 from app.utils.exceptions import MessageParsingError
 
 logger = logging.getLogger(__name__)
 
 # In-memory cache to track which services each user is provisioned to
-# Key: midpoint_uid, Value: set of TargetService
-_user_services_cache: dict[str, set[TargetService]] = {}
+# Key: midpoint_uid, Value: configured target IDs
+_user_services_cache: dict[str, set[str]] = {}
 
 
 def generate_random_password(length: int = 12) -> str:
@@ -213,54 +214,38 @@ class RabbitMQConsumer(BrokerConsumer):
             logger.error(f"Failed to process message: {e}")
             raise
 
-    # Mapping from role name to target service
-    ROLE_TO_SERVICE: dict[str, TargetService] = {
-        # Odoo aliases
-        "odoo": TargetService.ODOO,
-        "odoo1": TargetService.ODOO,
-        "odoo2": TargetService.ODOO,
-        "odoo3": TargetService.ODOO,
-        "odoo4": TargetService.ODOO,
-        "erp": TargetService.ODOO,
-        # MySQL aliases
-        "sql": TargetService.MYSQL,
-        "mysql": TargetService.MYSQL,
-        "mysql1": TargetService.MYSQL,
-        "mysql2": TargetService.MYSQL,
-        "mysql3": TargetService.MYSQL,
-        "mysql4": TargetService.MYSQL,
-        "mariadb": TargetService.MYSQL,
-        # PostgreSQL aliases
-        "postgresql": TargetService.POSTGRESQL,
-        "postgresql1": TargetService.POSTGRESQL,
-        "postgresql2": TargetService.POSTGRESQL,
-        "postgresql3": TargetService.POSTGRESQL,
-        "postgresql4": TargetService.POSTGRESQL,
-        "postgres": TargetService.POSTGRESQL,
-        "postgres1": TargetService.POSTGRESQL,
-        "postgres2": TargetService.POSTGRESQL,
-        "postgres3": TargetService.POSTGRESQL,
-        "postgres4": TargetService.POSTGRESQL,
-        "pg": TargetService.POSTGRESQL,
-        # LDAP aliases
-        "ldap": TargetService.LDAP,
-        "ldap1": TargetService.LDAP,
-        "ldap2": TargetService.LDAP,
-        "ldap3": TargetService.LDAP,
-        "ldap4": TargetService.LDAP,
-        "activedirectory": TargetService.LDAP,
-        "ad": TargetService.LDAP,
-        # MongoDB aliases
-        "mongodb": TargetService.MONGODB,
-        "mongo": TargetService.MONGODB,
-    }
-
     # Mapping from MidPoint operation to OperationType
-    OPERATION_MAPPING: dict[str, OperationType] = {
+    OPERATION_MAPPING: ClassVar[dict[str, OperationType]] = {
         "CREATE": OperationType.CREATE_USER,
         "UPDATE": OperationType.UPDATE_USER,
         "DELETE": OperationType.DELETE_USER,
     }
+
+    @staticmethod
+    def _targets_for_roles(roles: list[str]) -> list[str]:
+        """Resolve MidPoint role names/aliases using the target catalog."""
+        aliases = target_catalog.aliases()
+        return list(dict.fromkeys(
+            aliases[role.strip().lower()].id
+            for role in roles
+            if role.strip().lower() in aliases
+        ))
+
+    @staticmethod
+    def _target(target_id: str) -> TargetDefinition:
+        return target_catalog.get(target_id)
+
+    @staticmethod
+    def _targets_for_attributes(attributes: dict[str, Any]) -> list[str]:
+        """Resolve targets selected by a non-empty entitlement attribute."""
+        return [
+            target.id
+            for target in target_catalog.targets()
+            if any(
+                attributes.get(name)
+                for name in target.routing.entitlement_attributes
+            )
+        ]
 
     async def _parse_message(self, data: dict[str, Any]) -> list[MidPointMessage]:
         """Parse raw message data into MidPointMessage(s)
@@ -415,7 +400,13 @@ class RabbitMQConsumer(BrokerConsumer):
                 try:
                     from app.db.redis_client import RedisClient
                     redis_client = await RedisClient.get_client()
-                    for svc in ["MYSQL", "POSTGRESQL", "LDAP", "ODOO", "MONGODB"]:
+                    target_keys = list(dict.fromkeys(
+                        [
+                            *(target.id for target in target_catalog.targets()),
+                            *(target.family.value for target in target_catalog.targets()),
+                        ]
+                    ))
+                    for svc in target_keys:
                         keys = await redis_client.keys(f"user_state:{svc}:*")
                         for k in keys:
                             value = await redis_client.get(k)
@@ -440,6 +431,16 @@ class RabbitMQConsumer(BrokerConsumer):
             logger.info(f"PASSWORD: {password}")
             logger.info("=" * 60)
 
+        connector_attributes = dict(attributes)
+        connector_attributes.update({
+            "midpoint_uid": request_id,
+            "email": email,
+            "firstName": first_name,
+            "lastName": last_name,
+            "ldapGroups": ldap_groups,
+            "odooGroups": odoo_groups,
+            "mongodbRoles": mongodb_roles,
+        })
         user_data = UserData(
             username=username,
             email=email,
@@ -448,6 +449,7 @@ class RabbitMQConsumer(BrokerConsumer):
             password=password,
             roles=roles,
             attributes={
+                **connector_attributes,
                 "midpoint_uid": request_id,  # MidPoint unique ID for user identification
                 "email": email,
                 "firstName": first_name,
@@ -493,7 +495,7 @@ class RabbitMQConsumer(BrokerConsumer):
 
         # Create one message per target service based on roles
         messages: list[MidPointMessage] = []
-        target_services_processed: set[TargetService] = set()
+        target_services_processed: set[str] = set()
 
         # For DELETE operations, determine which services to delete from
         if operation_type == OperationType.DELETE_USER:
@@ -503,58 +505,40 @@ class RabbitMQConsumer(BrokerConsumer):
             cached_services = _user_services_cache.get(request_id, set())
             if cached_services:
                 target_services = list(cached_services)
-                logger.info(f"DELETE: Using cached services for user {request_id}: {[s.value for s in target_services]}")
+                logger.info(f"DELETE: Using cached targets for user {request_id}: {target_services}")
                 # Clear cache after DELETE
                 del _user_services_cache[request_id]
 
             # If roles are specified, add those services too
-            if roles:
-                for role in roles:
-                    role_lower = role.lower()
-                    if role_lower in self.ROLE_TO_SERVICE:
-                        service = self.ROLE_TO_SERVICE[role_lower]
-                        if service not in target_services:
-                            target_services.append(service)
+            for target_id in self._targets_for_roles(roles):
+                if target_id not in target_services:
+                    target_services.append(target_id)
 
-            # Also check ldapGroups - if present, include LDAP
-            if ldap_groups and TargetService.LDAP not in target_services:
-                target_services.append(TargetService.LDAP)
-                logger.info("DELETE: Including LDAP based on ldapGroups presence")
-
-            # Also check odooGroups - if present, include Odoo
-            if odoo_groups and TargetService.ODOO not in target_services:
-                target_services.append(TargetService.ODOO)
-
-            if mongodb_roles and TargetService.MONGODB not in target_services:
-                target_services.append(TargetService.MONGODB)
+            # Entitlement attributes can route independently of role names.
+            for target_id in self._targets_for_attributes(attributes):
+                if target_id not in target_services:
+                    target_services.append(target_id)
 
             # If still no services (no cache, no roles, no groups), try ALL services
             if not target_services:
                 logger.info("DELETE operation without any hints - attempting deletion from ALL services")
-                target_services = [
-                    TargetService.MYSQL,
-                    TargetService.POSTGRESQL,
-                    TargetService.LDAP,
-                    TargetService.ODOO,
-                    TargetService.MONGODB,
-                ]
+                target_services = [target.id for target in target_catalog.targets()]
 
         # Handle role removal (removedRoles attribute from Java connector)
         elif removed_roles:
             logger.info(f"Role removal detected via removedRoles: {removed_roles}")
             for role in removed_roles:
-                role_lower = role.lower()
-                if role_lower in self.ROLE_TO_SERVICE:
-                    target_service = self.ROLE_TO_SERVICE[role_lower]
-                    if target_service not in target_services_processed:
-                        target_services_processed.add(target_service)
+                for target_id in self._targets_for_roles([role]):
+                    target = self._target(target_id)
+                    if target_id not in target_services_processed:
+                        target_services_processed.add(target_id)
                         timestamp_ms = int(time.time() * 1000)
-                        if target_service == TargetService.LDAP:
-                            # For LDAP: UPDATE to remove group memberships (not DELETE the user)
+                        if target.routing.delete_mode == "update":
                             messages.append(MidPointMessage(
-                                request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",
+                                request_id=f"{request_id}-{target_id}-cleanup-{timestamp_ms}",
                                 operation_type=OperationType.UPDATE_USER,
-                                target_service=TargetService.LDAP,
+                                target_service=target.family,
+                                target_id=target.id,
                                 user_data=user_data,
                                 metadata={
                                     "source": "midpoint",
@@ -564,12 +548,13 @@ class RabbitMQConsumer(BrokerConsumer):
                                     "reason": "ldap role removed - group cleanup",
                                 },
                             ))
-                            logger.info("Created UPDATE operation for removed LDAP role (group cleanup)")
+                            logger.info(f"Created UPDATE cleanup for removed role on {target_id}")
                         else:
                             messages.append(MidPointMessage(
-                                request_id=f"{request_id}-{target_service.value.lower()}-delete-{timestamp_ms}",
+                                request_id=f"{request_id}-{target_id}-delete-{timestamp_ms}",
                                 operation_type=OperationType.DELETE_USER,
-                                target_service=target_service,
+                                target_service=target.family,
+                                target_id=target.id,
                                 user_data=user_data,
                                 metadata={
                                     "source": "midpoint",
@@ -578,23 +563,18 @@ class RabbitMQConsumer(BrokerConsumer):
                                     "removed_role": role,
                                 },
                             ))
-                            logger.info(f"Created DELETE operation for removed role '{role}' -> {target_service.value}")
+                            logger.info(f"Created DELETE operation for removed role '{role}' -> {target_id}")
 
             # Map remaining roles to target services for UPDATE
-            target_services = []
-            for role in roles:
-                role_lower = role.lower()
-                if role_lower in self.ROLE_TO_SERVICE:
-                    target_services.append(self.ROLE_TO_SERVICE[role_lower])
+            target_services = self._targets_for_roles(roles)
 
         # Handle UPDATE with partial roles - detect missing services that should be deleted
         elif operation_type == OperationType.UPDATE_USER:
             # Map current roles to target services
-            current_services: set[TargetService] = set()
-            for role in roles:
-                role_lower = role.lower()
-                if role_lower in self.ROLE_TO_SERVICE:
-                    current_services.add(self.ROLE_TO_SERVICE[role_lower])
+            current_services = {
+                *self._targets_for_roles(roles),
+                *self._targets_for_attributes(attributes),
+            }
 
             # Get previously provisioned services from cache
             previous_services = _user_services_cache.get(request_id, set())
@@ -603,19 +583,19 @@ class RabbitMQConsumer(BrokerConsumer):
             removed_services = previous_services - current_services
 
             if removed_services:
-                logger.info(f"UPDATE: Detected removed services for user {request_id}: {[s.value for s in removed_services]}")
+                logger.info(f"UPDATE: Detected removed targets for user {request_id}: {sorted(removed_services)}")
 
             # Create operations for removed services
-            for service in removed_services:
-                if service == TargetService.LDAP:
-                    # For LDAP: use UPDATE (not DELETE) so the connector removes group memberships
-                    # without deleting the entire LDAP user account
-                    logger.info("UPDATE: 'ldap' was removed - creating UPDATE for LDAP group cleanup")
+            for target_id in removed_services:
+                target = self._target(target_id)
+                if target.routing.delete_mode == "update":
+                    logger.info(f"UPDATE: '{target_id}' was removed - creating cleanup UPDATE")
                     timestamp_ms = int(time.time() * 1000)
                     messages.append(MidPointMessage(
-                        request_id=f"{request_id}-ldap-cleanup-{timestamp_ms}",
+                        request_id=f"{request_id}-{target_id}-cleanup-{timestamp_ms}",
                         operation_type=OperationType.UPDATE_USER,
-                        target_service=TargetService.LDAP,
+                        target_service=target.family,
+                        target_id=target.id,
                         user_data=user_data,
                         metadata={
                             "source": "midpoint",
@@ -625,21 +605,22 @@ class RabbitMQConsumer(BrokerConsumer):
                         },
                     ))
                 else:
-                    logger.info(f"UPDATE: '{service.value}' was removed - creating DELETE")
+                    logger.info(f"UPDATE: '{target_id}' was removed - creating DELETE")
                     timestamp_ms = int(time.time() * 1000)
                     messages.append(MidPointMessage(
-                        request_id=f"{request_id}-{service.value.lower()}-delete-{timestamp_ms}",
+                        request_id=f"{request_id}-{target_id}-delete-{timestamp_ms}",
                         operation_type=OperationType.DELETE_USER,
-                        target_service=service,
+                        target_service=target.family,
+                        target_id=target.id,
                         user_data=user_data,
                         metadata={
                             "source": "midpoint",
                             "entityType": data.get("entityType", "User"),
                             "original_uid": request_id,
-                            "reason": f"{service.value} role removed",
+                            "reason": f"{target_id} role removed",
                         },
                     ))
-                target_services_processed.add(service)
+                target_services_processed.add(target_id)
 
             # Update cache with current services
             _user_services_cache[request_id] = current_services.copy()
@@ -649,29 +630,30 @@ class RabbitMQConsumer(BrokerConsumer):
 
         else:
             # Map roles to target services for CREATE
-            target_services = []
-            for role in roles:
-                role_lower = role.lower()
-                if role_lower in self.ROLE_TO_SERVICE:
-                    target_services.append(self.ROLE_TO_SERVICE[role_lower])
+            target_services = list(dict.fromkeys([
+                *self._targets_for_roles(roles),
+                *self._targets_for_attributes(attributes),
+            ]))
 
             # Store in cache for future UPDATE/DELETE tracking
             if operation_type == OperationType.CREATE_USER and target_services:
                 _user_services_cache[request_id] = set(target_services)
-                logger.info(f"CREATE: Cached services for user {request_id}: {[s.value for s in target_services]}")
+                logger.info(f"CREATE: Cached targets for user {request_id}: {target_services}")
 
-        for target_service in target_services:
+        for target_id in target_services:
             # Avoid duplicate provisioning to same service
-            if target_service in target_services_processed:
+            if target_id in target_services_processed:
                 continue
-            target_services_processed.add(target_service)
+            target_services_processed.add(target_id)
+            target = self._target(target_id)
 
             # Add timestamp to make request_id unique per operation
             timestamp_ms = int(time.time() * 1000)
             messages.append(MidPointMessage(
-                request_id=f"{request_id}-{target_service.value.lower()}-{timestamp_ms}",
+                request_id=f"{request_id}-{target_id}-{timestamp_ms}",
                 operation_type=operation_type,
-                target_service=target_service,
+                target_service=target.family,
+                target_id=target.id,
                 user_data=user_data,
                 metadata={
                     "source": "midpoint",
@@ -684,7 +666,7 @@ class RabbitMQConsumer(BrokerConsumer):
         if not messages:
             logger.warning(
                 f"No target services found for roles: {roles}. "
-                f"Supported roles: {list(self.ROLE_TO_SERVICE.keys())}"
+                f"Configured aliases: {sorted(target_catalog.aliases())}"
             )
 
         return messages
@@ -730,8 +712,8 @@ class RabbitMQConsumer(BrokerConsumer):
             )
 
         try:
-            target_service = TargetService(target_service_str.upper())
-        except ValueError:
+            target = target_catalog.resolve(target_service_str)
+        except (KeyError, ValueError):
             raise MessageParsingError(
                 error_message=f"Invalid target_service: {target_service_str}"
             )
@@ -750,7 +732,8 @@ class RabbitMQConsumer(BrokerConsumer):
         return MidPointMessage(
             request_id=request_id,
             operation_type=operation_type,
-            target_service=target_service,
+            target_service=target.family,
+            target_id=target.id,
             user_data=user_data,
             metadata=data.get("metadata", {}),
         )

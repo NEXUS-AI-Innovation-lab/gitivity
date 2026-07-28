@@ -41,27 +41,37 @@ class LDAPConnector(ProvisioningConnector):
         """Establish connection to LDAP server"""
         try:
             # Build LDAP URL
-            protocol = "ldaps" if settings.LDAP_USE_SSL else "ldap"
-            url = f"{protocol}://{settings.LDAP_HOST}:{settings.LDAP_PORT}"
+            use_ssl = self.target_setting("use_ssl", settings.LDAP_USE_SSL)
+            host = self.target_setting("host", settings.LDAP_HOST)
+            port = self.target_setting("port", settings.LDAP_PORT)
+            protocol = "ldaps" if use_ssl else "ldap"
+            url = f"{protocol}://{host}:{port}"
 
             logger.info(f"Connecting to LDAP server: {url}")
 
             self._server = Server(
-                settings.LDAP_HOST,
-                port=settings.LDAP_PORT,
-                use_ssl=settings.LDAP_USE_SSL,
+                host,
+                port=port,
+                use_ssl=use_ssl,
                 get_info=ALL,
-                connect_timeout=settings.LDAP_CONNECT_TIMEOUT,
+                connect_timeout=self.target_setting(
+                    "connect_timeout", settings.LDAP_CONNECT_TIMEOUT
+                ),
             )
 
             self._connection = Connection(
                 self._server,
-                user=settings.LDAP_BIND_DN,
-                password=settings.LDAP_BIND_PASSWORD,
+                user=self.target_setting("bind_dn", settings.LDAP_BIND_DN),
+                password=self.target_setting(
+                    "bind_password", settings.LDAP_BIND_PASSWORD
+                ),
                 auto_bind=True,
             )
 
-            logger.info(f"Connected to LDAP server as {settings.LDAP_BIND_DN}")
+            logger.info(
+                "Connected to LDAP server as %s",
+                self.target_setting("bind_dn", settings.LDAP_BIND_DN),
+            )
 
         except LDAPException as e:
             logger.error(f"Failed to connect to LDAP: {e}")
@@ -96,7 +106,10 @@ class LDAPConnector(ProvisioningConnector):
 
     def _get_user_dn(self, username: str) -> str:
         """Get the user DN in the users OU"""
-        return f"uid={username},ou=Users,{settings.LDAP_BASE_DN}"
+        return (
+            f"uid={username},ou=Users,"
+            f"{self.target_setting('base_dn', settings.LDAP_BASE_DN)}"
+        )
 
     def _extract_base_dn_from_group(self, group_dn: str) -> str:
         """Extract base DN from a group DN
@@ -111,7 +124,7 @@ class LDAPConnector(ProvisioningConnector):
         dc_parts = [p for p in parts if p.lower().startswith("dc=")]
         if dc_parts:
             return ",".join(dc_parts)
-        return settings.LDAP_BASE_DN
+        return self.target_setting("base_dn", settings.LDAP_BASE_DN)
 
     async def _ensure_users_ou_exists(self, base_dn: str) -> None:
         """Ensure the ou=Users container exists"""
@@ -189,7 +202,7 @@ class LDAPConnector(ProvisioningConnector):
         if ldap_groups:
             base_dn = self._extract_base_dn_from_group(ldap_groups[0])
         else:
-            base_dn = settings.LDAP_BASE_DN
+            base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
 
         # User will be created in ou=Users,{base_dn}
         user_dn = f"uid={username},ou=Users,{base_dn}"
@@ -390,7 +403,7 @@ class LDAPConnector(ProvisioningConnector):
         if ldap_groups:
             base_dn = self._extract_base_dn_from_group(ldap_groups[0])
         else:
-            base_dn = settings.LDAP_BASE_DN
+            base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
 
         try:
             # FIRST: Search for user by employeeNumber (unique identifier)
@@ -597,7 +610,7 @@ class LDAPConnector(ProvisioningConnector):
         if ldap_groups:
             base_dn = self._extract_base_dn_from_group(ldap_groups[0])
         else:
-            base_dn = settings.LDAP_BASE_DN
+            base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
 
         user_dn = f"uid={username},ou=Users,{base_dn}"
         groups_removed = []
