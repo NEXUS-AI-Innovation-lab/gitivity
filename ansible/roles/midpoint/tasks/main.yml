@@ -184,9 +184,45 @@
 # ------------------------------------------------------------------
 # 5. Import roles
 # ------------------------------------------------------------------
+- name: Create generated MidPoint role directory
+  ansible.builtin.file:
+    path: "{{ project_dir }}/midpoint/generated-roles"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Initialize generated MidPoint role manifest
+  ansible.builtin.set_fact:
+    gateway_generated_role_files: []
+
+- name: Generate roles for additional target instances
+  ansible.builtin.include_tasks: generate_target_roles.yml
+  loop: "{{ gateway_additional_targets | default([]) }}"
+  loop_control:
+    loop_var: target_definition
+    label: "{{ target_definition.id }}"
+
+- name: Find generated MidPoint role XML files
+  ansible.builtin.find:
+    paths: "{{ project_dir }}/midpoint/generated-roles"
+    patterns: "*.xml"
+  register: generated_role_files
+
+- name: Remove stale generated MidPoint role XML files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ generated_role_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: item.path not in gateway_generated_role_files
+
 - name: Find all role XML files
   ansible.builtin.find:
-    paths: "{{ project_dir }}/midpoint/roles"
+    paths:
+      - "{{ project_dir }}/midpoint/roles"
+      - "{{ project_dir }}/midpoint/generated-roles"
     patterns: "*.xml"
   register: role_files
 

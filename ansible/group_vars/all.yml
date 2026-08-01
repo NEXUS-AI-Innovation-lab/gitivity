@@ -19,6 +19,30 @@ gateway_required_application_markers:
   - path: app/core/orchestrator.py
     marker: "Duplicate pending UPDATE detected"
 
+# Standard MidPoint roles generated for additional target instances
+# (target id differs from its connector type, e.g. mongodb-rh / mongodb).
+gateway_midpoint_role_defaults:
+  mysql:
+    - { key: base, label: "Base" }
+    - { key: readonly, label: "ReadOnly", association_ref: mysqlProfile, association_value: readonly }
+    - { key: admin, label: "Admin", association_ref: mysqlProfile, association_value: admin }
+  postgresql:
+    - { key: base, label: "Base" }
+    - { key: readonly, label: "ReadOnly", association_ref: postgresqlProfile, association_value: readonly }
+    - { key: admin, label: "Admin", association_ref: postgresqlProfile, association_value: admin }
+  mongodb:
+    - { key: base, label: "Base" }
+    - { key: read, label: "Read", association_ref: mongodbRole, association_value: "read@{database}" }
+    - { key: readwrite, label: "ReadWrite", association_ref: mongodbRole, association_value: "readWrite@{database}" }
+    - { key: dbadmin, label: "DbAdmin", association_ref: mongodbRole, association_value: "dbAdmin@{database}" }
+    - { key: dbowner, label: "DbOwner", association_ref: mongodbRole, association_value: "dbOwner@{database}" }
+  ldap:
+    - { key: base, label: "Base" }
+    - { key: developers, label: "Developers", association_ref: ldapGroup, association_value: Developers }
+    - { key: admins, label: "Admins", association_ref: ldapGroup, association_value: Admins }
+  odoo:
+    - { key: base, label: "Base" }
+
 # --- Server IP (used in approval email links and service URLs) ----------------
 # Service ports are bound only on this address, not on every host interface.
 service_bind_ip: "10.10.0.1"

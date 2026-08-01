@@ -19,6 +19,9 @@ Chaque entrée décrit :
 - `routing.delete_mode` : `delete`, ou `update` pour un nettoyage sans
   suppression du compte (cas LDAP) ;
 - `entitlements` : configuration optionnelle de découverte des droits.
+- `deployment.environment` : variables ajoutées automatiquement à
+  `.env.docker` par Ansible pour une instance supplémentaire ;
+- `deployment.midpoint_database` : nom utilisé dans les rôles MongoDB générés.
 
 Les valeurs `${VARIABLE:-défaut}` sont remplacées par les variables
 d'environnement lors du chargement. Le fichier est relu automatiquement dès
@@ -28,18 +31,7 @@ que sa date de modification change.
 
 Exemple : une seconde base PostgreSQL dédiée au reporting.
 
-1. Ajouter les secrets et paramètres dans `.env.docker` ou dans le template
-   Ansible qui le produit :
-
-   ```dotenv
-   REPORTING_DB_HOST=reporting-db.internal
-   REPORTING_DB_PORT=5432
-   REPORTING_DB_USER=provisioner
-   REPORTING_DB_PASSWORD=un-secret-fort
-   REPORTING_DB_NAME=reporting
-   ```
-
-2. Dupliquer l'entrée PostgreSQL dans `config/targets.yaml` et l'adapter :
+1. Dupliquer l'entrée PostgreSQL dans `config/targets.yaml` et l'adapter :
 
    ```yaml
    - id: reporting
@@ -56,30 +48,28 @@ Exemple : une seconde base PostgreSQL dédiée au reporting.
        connect_timeout: 10
      routing:
        entitlement_attributes: [reportingRole]
+     deployment:
+       environment:
+         REPORTING_DB_HOST: reporting-db.internal
+         REPORTING_DB_PORT: 5432
+         REPORTING_DB_USER: provisioner
+         REPORTING_DB_PASSWORD: un-secret-fort
+         REPORTING_DB_NAME: reporting
    ```
 
-3. Créer dans MidPoint le rôle ou le mapping qui envoie `reporting` dans
-   l'attribut `roles`. Si la ressource utilise un entitlement dédié, envoyer
-   plutôt `reportingRole`.
+2. Relancer le playbook Ansible habituel. Il valide la cible, ajoute les
+   variables à `.env.docker`, génère les rôles MidPoint standards avec des OID
+   déterministes, puis les importe par upsert. Aucun XML ne doit être créé
+   manuellement.
 
-4. Relancer le déploiement. Le catalogue est monté dans les conteneurs, donc une
-   simple recréation de l'API et du consumer suffit :
-
-   ```bash
-   docker compose up -d --build gateway-api gateway-consumer gateway-http
-   ```
-
-   Avec Ansible, relancer le playbook habituel : la synchronisation inclut
-   automatiquement `config/targets.yaml`.
-
-5. Vérifier que la cible apparaît et répond :
+3. Vérifier que la cible apparaît et répond :
 
    ```bash
    curl http://10.10.0.1:8100/api/v1/connectors/gateway
    curl -X POST http://10.10.0.1:8100/api/v1/connectors/gateway/reporting/test
    ```
 
-6. Tester un provisionnement :
+4. Tester un provisionnement :
 
    ```bash
    python scripts/send_test_message.py --service reporting --action create
@@ -130,6 +120,10 @@ curl http://10.10.0.1:5100/targets
 ```
 
 Les secrets ne sont jamais retournés par l'API des connecteurs.
+
+Pour le moment, `deployment.environment` suit le mécanisme existant et peut
+contenir les valeurs directement. L'adoption d'Ansible Vault pourra se faire
+ultérieurement sans modifier le générateur.
 
 ## Comportement interne
 

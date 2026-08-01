@@ -40,6 +40,35 @@ def test_catalog_resolves_aliases_and_environment(tmp_path, monkeypatch):
     assert target.connection["port"] == 5544
 
 
+def test_catalog_parses_deployment_metadata(tmp_path):
+    path = tmp_path / "targets.yaml"
+    write_catalog(
+        path,
+        second="""
+""",
+    )
+    content = path.read_text(encoding="utf-8")
+    path.write_text(
+        content
+        + """
+    deployment:
+      environment:
+        REPORTING_DB_HOST: reporting-db.internal
+        REPORTING_DB_PORT: 5432
+      midpoint_database: reporting
+""",
+        encoding="utf-8",
+    )
+
+    target = TargetCatalog(path).get("reporting")
+
+    assert target.deployment.environment == {
+        "REPORTING_DB_HOST": "reporting-db.internal",
+        "REPORTING_DB_PORT": 5432,
+    }
+    assert target.deployment.midpoint_database == "reporting"
+
+
 def test_catalog_hot_reloads_after_file_change(tmp_path):
     path = tmp_path / "targets.yaml"
     write_catalog(path, host="old-host")

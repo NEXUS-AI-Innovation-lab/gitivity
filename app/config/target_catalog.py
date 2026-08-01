@@ -61,6 +61,13 @@ class EntitlementConfig(BaseModel):
     fallback: list[str] = Field(default_factory=list)
 
 
+class TargetDeployment(BaseModel):
+    """Deployment-only values used by Ansible artifact generation."""
+
+    environment: dict[str, Any] = Field(default_factory=dict)
+    midpoint_database: str | None = None
+
+
 class TargetDefinition(BaseModel):
     """One configured target instance."""
 
@@ -73,6 +80,7 @@ class TargetDefinition(BaseModel):
     provisioning: dict[str, Any] = Field(default_factory=dict)
     routing: TargetRouting = Field(default_factory=TargetRouting)
     entitlements: EntitlementConfig | None = None
+    deployment: TargetDeployment = Field(default_factory=TargetDeployment)
 
     @field_validator("id", "type")
     @classmethod

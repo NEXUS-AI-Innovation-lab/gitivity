@@ -20,6 +20,66 @@
   loop_control:
     label: "{{ item.id | default('unknown') }}"
 
+- name: Identify additional target instances
+  ansible.builtin.set_fact:
+    gateway_additional_targets: []
+
+- name: Collect enabled non-default target instances
+  ansible.builtin.set_fact:
+    gateway_additional_targets: >-
+      {{ gateway_additional_targets + [item] }}
+  loop: "{{ gateway_target_catalog.targets }}"
+  loop_control:
+    label: "{{ item.id }}"
+  when:
+    - item.enabled | default(true) | bool
+    - item.id != item.type
+
+- name: Validate deployment metadata for additional targets
+  ansible.builtin.assert:
+    that:
+      - item.type in gateway_midpoint_role_defaults
+      - item.deployment is defined
+      - item.deployment.environment is defined
+      - item.deployment.environment | length > 0
+    fail_msg: >-
+      Additional target '{{ item.id }}' must define
+      deployment.environment and use a supported connector type.
+  loop: "{{ gateway_additional_targets }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Initialize generated target environment
+  ansible.builtin.set_fact:
+    gateway_generated_target_environment: {}
+    gateway_generated_target_environment_keys: []
+
+- name: Merge environment variables from additional targets
+  ansible.builtin.set_fact:
+    gateway_generated_target_environment: >-
+      {{
+        gateway_generated_target_environment
+        | combine(item.deployment.environment)
+      }}
+    gateway_generated_target_environment_keys: >-
+      {{
+        gateway_generated_target_environment_keys
+        + (item.deployment.environment.keys() | list)
+      }}
+  loop: "{{ gateway_additional_targets }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Reject duplicate environment variables across additional targets
+  ansible.builtin.assert:
+    that:
+      - >-
+        gateway_generated_target_environment_keys | length
+        ==
+        gateway_generated_target_environment_keys | unique | length
+    fail_msg: >-
+      Additional targets declare the same environment variable more than once.
+
 - name: Enforce Gateway application rollout contract
   ansible.builtin.assert:
     that:
