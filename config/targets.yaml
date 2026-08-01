@@ -68,12 +68,19 @@ targets:
       bind_dn: ${LDAP_BIND_DN:-uid=admin,ou=system}
       bind_password: ${LDAP_BIND_PASSWORD:-secret}
       base_dn: ${LDAP_BASE_DN:-dc=openmicroscopy,dc=org}
+      users_base_dn: ${LDAP_USERS_BASE_DN:-ou=Users,dc=openmicroscopy,dc=org}
+      groups_base_dn: ${LDAP_GROUPS_BASE_DN:-ou=Groups,dc=openmicroscopy,dc=org}
+      group_object_classes: [groupOfNames, groupOfUniqueNames]
       user_object_class: ${LDAP_USER_OBJECT_CLASS:-inetOrgPerson}
       connect_timeout: ${LDAP_CONNECT_TIMEOUT:-10}
     routing:
       entitlement_attributes: [ldapGroups, ldapGroup]
       delete_mode: update
-
+    provisioning:
+      seed_groups: [Admins, Developers, Managers, Users]
+      group_object_class: groupOfNames
+      group_member_attribute: member
+      group_initial_member: ${LDAP_BIND_DN:-uid=admin,ou=system}
   - id: odoo
     type: odoo
     display_name: Odoo
@@ -88,3 +95,50 @@ targets:
     routing:
       entitlement_attributes: [odooGroups, odooGroup]
 
+  - id: ldap-test
+    type: ldap
+    display_name: LDAP_TEST
+    enabled: true
+    aliases: [ldap-test]
+    connection:
+      host: ${LDAP_TEST_HOST:-localhost}
+      port: ${LDAP_TEST_PORT:-10389}
+      use_ssl: ${LDAP_TEST_USE_SSL:-false}
+      bind_dn: ${LDAP_TEST_BIND_DN:-uid=admin,ou=system}
+      bind_password: ${LDAP_TEST_BIND_PASSWORD:-secret}
+      base_dn: ${LDAP_TEST_BASE_DN:-dc=openmicroscopy,dc=org}
+      users_base_dn: ${LDAP_TEST_USERS_BASE_DN:-ou=users,ou=olga,dc=lissi,dc=fr}
+      groups_base_dn: ${LDAP_TEST_GROUPS_BASE_DN:-ou=groups,ou=olga,dc=lissi,dc=fr}
+      group_object_classes: [groupOfNames]
+      user_object_class: ${LDAP_TEST_USER_OBJECT_CLASS:-inetOrgPerson}
+      connect_timeout: ${LDAP_TEST_CONNECT_TIMEOUT:-10}
+    routing:
+      entitlement_attributes: [ldapGroups, ldapGroup]
+      delete_mode: update
+    deployment:
+      environment:
+        LDAP_TEST_HOST: 10.10.0.1
+        LDAP_TEST_PORT: 389
+        LDAP_TEST_USE_SSL: false
+        LDAP_TEST_BIND_DN: cn=admin,dc=lissi,dc=fr
+        LDAP_TEST_BIND_PASSWORD: labadmin
+        LDAP_TEST_BASE_DN: dc=lissi,dc=fr
+        LDAP_TEST_USERS_BASE_DN: ou=users,ou=olga,dc=lissi,dc=fr
+        LDAP_TEST_GROUPS_BASE_DN: ou=groups,ou=olga,dc=lissi,dc=fr
+        LDAP_TEST_USER_OBJECT_CLASS: inetOrgPerson
+        LDAP_TEST_CONNECT_TIMEOUT: 10
+      midpoint_roles:
+        - { key: admins, label: Admins, association_ref: ldapGroup, association_value: admins }
+        - { key: developpeurs, label: Developpeurs, association_ref: ldapGroup, association_value: developpeurs }
+        - { key: it-support, label: IT Support, association_ref: ldapGroup, association_value: it-support }
+        - { key: assistants, label: Assistants, association_ref: ldapGroup, association_value: assistants }
+        - { key: rh, label: RH, association_ref: ldapGroup, association_value: rh }
+        - { key: comptabilite, label: Comptabilite, association_ref: ldapGroup, association_value: comptabilite }
+        - { key: marketing, label: Marketing, association_ref: ldapGroup, association_value: marketing }
+        - { key: ventes, label: Ventes, association_ref: ldapGroup, association_value: ventes }
+        - { key: direction, label: Direction, association_ref: ldapGroup, association_value: direction }
+        - { key: stagiaires, label: Stagiaires, association_ref: ldapGroup, association_value: stagiaires }
+        - { key: soignant, label: SOIGNANT, association_ref: ldapGroup, association_value: SOIGNANT }
+        - { key: administratif, label: ADMINISTRATIF, association_ref: ldapGroup, association_value: ADMINISTRATIF }
+        - { key: externe, label: EXTERNE, association_ref: ldapGroup, association_value: EXTERNE }
+        - { key: medical, label: MEDICAL, association_ref: ldapGroup, association_value: MEDICAL }

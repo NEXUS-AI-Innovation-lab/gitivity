@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class LDAPConnector(ProvisioningConnector):
     """Connector for LDAP user provisioning
 
-    Creates users in ou=Users under the base DN, then adds them as members
+    Creates users under the configured users base DN, then adds them as members
     to LDAP groups specified in ldapGroups attribute.
     """
 
@@ -105,56 +105,53 @@ class LDAPConnector(ProvisioningConnector):
             return False
 
     def _get_user_dn(self, username: str) -> str:
-        """Get the user DN in the users OU"""
-        return (
-            f"uid={username},ou=Users,"
-            f"{self.target_setting('base_dn', settings.LDAP_BASE_DN)}"
-        )
+        """Get the user DN under the target's explicit users base DN."""
+        return f"uid={username},{self._get_users_base_dn()}"
 
-    def _extract_base_dn_from_group(self, group_dn: str) -> str:
-        """Extract base DN from a group DN
+    def _get_users_base_dn(self) -> str:
+        """Return the configured user container, with a legacy-safe fallback."""
+        base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
+        return self.target_setting("users_base_dn", f"ou=Users,{base_dn}")
 
-        Example: cn=Users,ou=Groups,dc=example,dc=com -> dc=example,dc=com
+    async def _ensure_users_base_exists(self, users_base_dn: str) -> None:
+        """Ensure the configured leaf user container exists."""
+        rdn, parent_dn = users_base_dn.split(",", 1)
+        attribute, value = rdn.split("=", 1)
 
-        The base DN is inferred from the group DN so we don't need a separate
-        config per group. Falls back to LDAP_BASE_DN if no dc= component found.
-        """
-        parts = group_dn.split(",")
-        # Collect all dc= components — they form the root of the directory tree
-        dc_parts = [p for p in parts if p.lower().startswith("dc=")]
-        if dc_parts:
-            return ",".join(dc_parts)
-        return self.target_setting("base_dn", settings.LDAP_BASE_DN)
-
-    async def _ensure_users_ou_exists(self, base_dn: str) -> None:
-        """Ensure the ou=Users container exists"""
-        users_ou_dn = f"ou=Users,{base_dn}"
-
-        # Check if ou=Users exists
         self._connection.search(
-            search_base=base_dn,
-            search_filter="(ou=Users)",
+            search_base=parent_dn,
+            search_filter=f"({attribute}={value})",
             search_scope=SUBTREE,
         )
 
         if not self._connection.entries:
-            # Create ou=Users
-            logger.info(f"Creating ou=Users under {base_dn}")
+            if attribute.lower() != "ou":
+                raise ProvisioningError(
+                    operation_id="",
+                    target_service=TargetService.LDAP,
+                    error_message=(
+                        f"Unsupported users_base_dn leaf {rdn!r}; only ou= is auto-created"
+                    ),
+                    is_retriable=False,
+                )
+            logger.info("Creating LDAP users container: %s", users_base_dn)
             self._connection.add(
-                users_ou_dn,
+                users_base_dn,
                 attributes={
                     "objectClass": ["organizationalUnit", "top"],
-                    "ou": "Users",
+                    "ou": value,
                 },
             )
 
-    async def _find_user_by_employee_number(self, employee_number: str, base_dn: str) -> str | None:
+    async def _find_user_by_employee_number(
+        self, employee_number: str, users_base_dn: str
+    ) -> str | None:
         """Find existing user by employeeNumber and return their DN"""
         if not employee_number:
             return None
 
         self._connection.search(
-            search_base=f"ou=Users,{base_dn}",
+            search_base=users_base_dn,
             search_filter=f"(employeeNumber={employee_number})",
             search_scope=SUBTREE,
         )
@@ -175,7 +172,7 @@ class LDAPConnector(ProvisioningConnector):
 
         1. Checks if user exists by employeeNumber (MidPoint UID)
         2. If exists: updates the user
-        3. If not: creates user in ou=Users,{base_dn}
+        3. If not: creates user under the configured users_base_dn
         4. Adds user DN to each group's 'member' or 'uniqueMember' attribute
         """
         if not self._connection:
@@ -198,21 +195,16 @@ class LDAPConnector(ProvisioningConnector):
         last_name = attrs.get("lastName", "")
         full_name = attrs.get("fullName", f"{first_name} {last_name}".strip())
 
-        # Determine base DN from first group or use settings
-        if ldap_groups:
-            base_dn = self._extract_base_dn_from_group(ldap_groups[0])
-        else:
-            base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
-
-        # User will be created in ou=Users,{base_dn}
-        user_dn = f"uid={username},ou=Users,{base_dn}"
+        users_base_dn = self._get_users_base_dn()
+        user_dn = f"uid={username},{users_base_dn}"
 
         try:
-            # Ensure ou=Users exists
-            await self._ensure_users_ou_exists(base_dn)
+            await self._ensure_users_base_exists(users_base_dn)
 
             # FIRST: Check if user exists by employeeNumber (unique identifier)
-            existing_dn = await self._find_user_by_employee_number(employee_number, base_dn)
+            existing_dn = await self._find_user_by_employee_number(
+                employee_number, users_base_dn
+            )
 
             if existing_dn:
                 # User exists - update instead of create
@@ -227,7 +219,7 @@ class LDAPConnector(ProvisioningConnector):
 
             # SECOND: Check if user exists by uid (username)
             self._connection.search(
-                search_base=f"ou=Users,{base_dn}",
+                search_base=users_base_dn,
                 search_filter=f"(uid={username})",
                 search_scope=SUBTREE,
             )
@@ -399,20 +391,18 @@ class LDAPConnector(ProvisioningConnector):
         last_name = attrs.get("lastName", "")
         full_name = attrs.get("fullName", f"{first_name} {last_name}".strip())
 
-        # Determine base DN
-        if ldap_groups:
-            base_dn = self._extract_base_dn_from_group(ldap_groups[0])
-        else:
-            base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
+        users_base_dn = self._get_users_base_dn()
 
         try:
             # FIRST: Search for user by employeeNumber (unique identifier)
-            existing_dn = await self._find_user_by_employee_number(employee_number, base_dn)
+            existing_dn = await self._find_user_by_employee_number(
+                employee_number, users_base_dn
+            )
 
             if not existing_dn:
                 # SECOND: Search by uid (username)
                 self._connection.search(
-                    search_base=f"ou=Users,{base_dn}",
+                    search_base=users_base_dn,
                     search_filter=f"(uid={username})",
                     search_scope=SUBTREE,
                 )
@@ -467,7 +457,7 @@ class LDAPConnector(ProvisioningConnector):
             # Search both 'member' and 'uniqueMember' to handle different schema types
             current_user_groups = []
             self._connection.search(
-                search_base=base_dn,
+                search_base=self.target_setting("base_dn", settings.LDAP_BASE_DN),
                 search_filter=f"(|(member={existing_dn})(uniqueMember={existing_dn}))",
                 search_scope=SUBTREE,
                 attributes=["cn"],
@@ -606,13 +596,8 @@ class LDAPConnector(ProvisioningConnector):
         if isinstance(ldap_groups, str):
             ldap_groups = [ldap_groups]
 
-        # Determine base DN
-        if ldap_groups:
-            base_dn = self._extract_base_dn_from_group(ldap_groups[0])
-        else:
-            base_dn = self.target_setting("base_dn", settings.LDAP_BASE_DN)
-
-        user_dn = f"uid={username},ou=Users,{base_dn}"
+        users_base_dn = self._get_users_base_dn()
+        user_dn = f"uid={username},{users_base_dn}"
         groups_removed = []
         errors = []
 
@@ -656,7 +641,7 @@ class LDAPConnector(ProvisioningConnector):
 
             # Then delete the user entry
             self._connection.search(
-                search_base=f"ou=Users,{base_dn}",
+                search_base=users_base_dn,
                 search_filter=f"(uid={username})",
                 search_scope=SUBTREE,
             )

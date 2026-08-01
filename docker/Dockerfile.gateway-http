@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir flask ldap3 'pymongo>=4.6,<5' 'PyYAML>=6,<7'
 
 # Copy application files
 COPY gateway-http/gateway-http.py ./gateway-http.py
+COPY gateway-http/seed_ldap_groups.py ./seed_ldap_groups.py
 COPY gateway-http/config.json ./config.json
 COPY config ./config
 

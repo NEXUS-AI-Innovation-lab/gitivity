@@ -241,6 +241,27 @@
   register: compose_up
   changed_when: compose_up.rc == 0
 
+- name: Seed declared LDAP target groups idempotently
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - gitivity-http
+      - python
+      - /app/seed_ldap_groups.py
+      - --target
+      - "{{ item.id }}"
+  loop: "{{ gateway_target_catalog.targets }}"
+  loop_control:
+    label: "{{ item.id }}"
+  when:
+    - with_targets | bool
+    - item.enabled | default(true) | bool
+    - item.type == 'ldap'
+    - (item.provisioning | default({})).get('seed_groups', []) | length > 0
+  register: ldap_group_seed
+  changed_when: (ldap_group_seed.stdout | from_json).changed | bool
+
 - name: Wait for the Gateway API after rollout
   ansible.builtin.uri:
     url: "http://{{ service_bind_ip }}:8100/health"

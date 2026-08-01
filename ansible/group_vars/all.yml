@@ -38,8 +38,6 @@ gateway_midpoint_role_defaults:
     - { key: dbowner, label: "DbOwner", association_ref: mongodbRole, association_value: "dbOwner@{database}" }
   ldap:
     - { key: base, label: "Base" }
-    - { key: developers, label: "Developers", association_ref: ldapGroup, association_value: Developers }
-    - { key: admins, label: "Admins", association_ref: ldapGroup, association_value: Admins }
   odoo:
     - { key: base, label: "Base" }
 

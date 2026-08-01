@@ -22,6 +22,10 @@ Chaque entrée décrit :
 - `deployment.environment` : variables ajoutées automatiquement à
   `.env.docker` par Ansible pour une instance supplémentaire ;
 - `deployment.midpoint_database` : nom utilisé dans les rôles MongoDB générés.
+- `deployment.midpoint_roles` : entitlements propres à une instance, utilisés
+  pour générer ses rôles midPoint (notamment les groupes d'un LDAP additionnel).
+- `connection.group_object_classes` : classes LDAP utilisées pour découvrir
+  les groupes de cette cible, par exemple `groupOfNames` ou `posixGroup`.
 
 Les valeurs `${VARIABLE:-défaut}` sont remplacées par les variables
 d'environnement lors du chargement. Le fichier est relu automatiquement dès

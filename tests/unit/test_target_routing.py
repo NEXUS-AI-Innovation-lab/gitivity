@@ -56,6 +56,25 @@ async def test_entitlement_attribute_routes_without_role_alias():
 
 
 @pytest.mark.asyncio
+async def test_explicit_target_role_wins_over_shared_family_entitlement():
+    messages = await consumer_without_dependencies()._parse_midpoint_format({
+        "operation": "CREATE",
+        "uid": "user-oid-ldap-test",
+        "attributes": {
+            "username": "dave",
+            "password": "H7!mR4#kP9@w",
+            "roles": ["ldap-test"],
+            "ldapGroups": ["cn=Developers,ou=Groups,dc=lissi,dc=fr"],
+        },
+    })
+
+    assert [message.target_id for message in messages] == ["ldap-test"]
+    assert messages[0].user_data.attributes["ldapGroups"] == [
+        "cn=Developers,ou=Groups,dc=lissi,dc=fr"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ldap_role_removal_uses_configured_cleanup_mode():
     messages = await consumer_without_dependencies()._parse_midpoint_format({
         "operation": "UPDATE",

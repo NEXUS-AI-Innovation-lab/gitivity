@@ -247,6 +247,33 @@ class RabbitMQConsumer(BrokerConsumer):
             )
         ]
 
+    @classmethod
+    def _targets_for_message(
+        cls,
+        roles: list[str],
+        attributes: dict[str, Any],
+    ) -> list[str]:
+        """Resolve targets, giving explicit roles priority per connector family.
+
+        Entitlement attributes like ``ldapGroups`` are shared by all instances
+        of a connector family. If a role selects ``ldap-test``, the attribute
+        enriches that target without also selecting the default ``ldap`` one.
+        """
+        role_targets = cls._targets_for_roles(roles)
+        explicit_families = {
+            cls._target(target_id).family
+            for target_id in role_targets
+        }
+        attribute_targets = [
+            target_id
+            for target_id in cls._targets_for_attributes(attributes)
+            if (
+                target_id in role_targets
+                or cls._target(target_id).family not in explicit_families
+            )
+        ]
+        return list(dict.fromkeys([*role_targets, *attribute_targets]))
+
     async def _parse_message(self, data: dict[str, Any]) -> list[MidPointMessage]:
         """Parse raw message data into MidPointMessage(s)
 
@@ -515,7 +542,7 @@ class RabbitMQConsumer(BrokerConsumer):
                     target_services.append(target_id)
 
             # Entitlement attributes can route independently of role names.
-            for target_id in self._targets_for_attributes(attributes):
+            for target_id in self._targets_for_message(roles, attributes):
                 if target_id not in target_services:
                     target_services.append(target_id)
 
@@ -571,10 +598,7 @@ class RabbitMQConsumer(BrokerConsumer):
         # Handle UPDATE with partial roles - detect missing services that should be deleted
         elif operation_type == OperationType.UPDATE_USER:
             # Map current roles to target services
-            current_services = {
-                *self._targets_for_roles(roles),
-                *self._targets_for_attributes(attributes),
-            }
+            current_services = set(self._targets_for_message(roles, attributes))
 
             # Get previously provisioned services from cache
             previous_services = _user_services_cache.get(request_id, set())
@@ -630,10 +654,7 @@ class RabbitMQConsumer(BrokerConsumer):
 
         else:
             # Map roles to target services for CREATE
-            target_services = list(dict.fromkeys([
-                *self._targets_for_roles(roles),
-                *self._targets_for_attributes(attributes),
-            ]))
+            target_services = self._targets_for_message(roles, attributes)
 
             # Store in cache for future UPDATE/DELETE tracking
             if operation_type == OperationType.CREATE_USER and target_services:

@@ -5,6 +5,8 @@ from app.core.connectors.factory import ConnectorFactory, get_connector
 from app.core.connectors.mysql_connector import MySQLConnector, ROLE_TO_PRIVILEGES
 from app.core.connectors.postgresql_connector import PostgreSQLConnector, ROLE_TO_PG_ROLES
 from app.core.connectors.mongodb_connector import MongoDBConnector
+from app.core.connectors.ldap_connector import LDAPConnector
+from app.config.target_catalog import TargetDefinition
 from app.utils.enums import TargetService
 from app.utils.exceptions import ConnectorNotFoundError
 
@@ -53,6 +55,39 @@ class TestConnectorFactory:
         """Test get_connector convenience function"""
         connector = get_connector(TargetService.MYSQL)
         assert isinstance(connector, MySQLConnector)
+
+
+class TestLDAPConnector:
+    def test_uses_explicit_users_base_dn(self):
+        connector = LDAPConnector().configure_target(
+            TargetDefinition(
+                id="ldap-test",
+                type="ldap",
+                display_name="LDAP Test",
+                connection={
+                    "base_dn": "dc=lissi,dc=fr",
+                    "users_base_dn": "ou=users,ou=olga,dc=lissi,dc=fr",
+                },
+            )
+        )
+
+        assert connector._get_user_dn("test-new-ldap") == (
+            "uid=test-new-ldap,ou=users,ou=olga,dc=lissi,dc=fr"
+        )
+
+    def test_users_base_dn_has_legacy_safe_fallback(self):
+        connector = LDAPConnector().configure_target(
+            TargetDefinition(
+                id="ldap-legacy",
+                type="ldap",
+                display_name="LDAP Legacy",
+                connection={"base_dn": "dc=example,dc=org"},
+            )
+        )
+
+        assert connector._get_user_dn("alice") == (
+            "uid=alice,ou=Users,dc=example,dc=org"
+        )
 
 
 class TestMySQLConnector:

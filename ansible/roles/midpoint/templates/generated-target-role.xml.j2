@@ -19,6 +19,13 @@
                 </outbound>
             </attribute>
 {% if target_role.association_ref is defined %}
+{% set association_value = target_role.association_value | replace(
+    '{database}',
+    target_definition.deployment.midpoint_database | default('target_db', true)
+) %}
+{% if target_definition.type == 'ldap' %}
+{% set association_value = target_definition.id ~ '.' ~ association_value %}
+{% endif %}
             <association>
                 <ref>ri:{{ target_role.association_ref }}</ref>
                 <outbound>
@@ -28,16 +35,7 @@
                             <filter>
                                 <q:equal>
                                     <q:path>attributes/icfs:name</q:path>
-                                    <q:value>{{
-                                      (
-                                        target_role.association_value
-                                        | replace(
-                                            '{database}',
-                                            target_definition.deployment.midpoint_database
-                                            | default('target_db', true)
-                                          )
-                                      ) | e
-                                    }}</q:value>
+                                    <q:value>{{ association_value | e }}</q:value>
                                 </q:equal>
                             </filter>
                             <searchStrategy>onResourceIfNeeded</searchStrategy>

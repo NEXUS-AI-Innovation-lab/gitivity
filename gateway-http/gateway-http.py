@@ -62,48 +62,58 @@ def get_target(target_id=None, target_type=None):
     return next((target for target in targets if target.get('type') == target_type), None)
 
 def get_ldap_groups():
-    """Récupère les groupes LDAP depuis tous les serveurs LDAP configurés.
-
-    config.json -> configs.LDAP est une liste de serveurs, chacun avec un 'name'
-    (domaine). Le cn de chaque groupe est préfixé par le nom du domaine
-    (ex: domain1.Admins) pour distinguer les serveurs.
-    """
-    config = load_config()
-    ldap_servers = config.get('configs', {}).get('LDAP', [])
-
-    # Rétrocompat : si LDAP est encore un seul objet, on l'enveloppe dans une liste
-    if isinstance(ldap_servers, dict):
-        ldap_servers = [ldap_servers]
-
+    """Discover groups from every enabled LDAP target in targets.yaml."""
+    ldap_targets = [target for target in load_targets() if target.get('type') == 'ldap']
     all_groups = []
-    for ldap_config in ldap_servers:
-        all_groups.extend(_fetch_ldap_groups_for_server(ldap_config))
+    for target in ldap_targets:
+        all_groups.extend(_fetch_ldap_groups_for_target(target))
     return all_groups
 
 
-def _fetch_ldap_groups_for_server(ldap_config):
-    """Récupère les groupes d'un seul serveur LDAP, préfixés par son name."""
-    domain = ldap_config.get('name', 'default')
+def _fetch_ldap_groups_for_target(target):
+    """Fetch one target's groups, namespacing additional LDAP instances."""
+    target_id = target['id']
+    connection = target.get('connection', {})
+    prefix = '' if target_id == target.get('type') else f'{target_id}.'
 
-    if not ldap_config.get('host'):
+    if not connection.get('host'):
         return []
 
     try:
         import ldap3
-        ldap_host = ldap_config.get('host', 'localhost')
-        ldap_port = int(ldap_config.get('port', 389))
-        server = ldap3.Server(ldap_host, port=ldap_port, get_info=ldap3.ALL)
+        ldap_host = connection.get('host', 'localhost')
+        ldap_port = int(connection.get('port', 389))
+        use_ssl = bool(connection.get('use_ssl', False))
+        server = ldap3.Server(
+            ldap_host,
+            port=ldap_port,
+            use_ssl=use_ssl,
+            get_info=ldap3.ALL,
+        )
         conn = ldap3.Connection(
             server,
-            user=ldap_config.get('bindDn'),
-            password=ldap_config.get('password'),
+            user=connection.get('bind_dn'),
+            password=connection.get('bind_password'),
             auto_bind=True
         )
 
-        groups_base = ldap_config.get('groupsBaseDn', f"ou=Groups,{ldap_config.get('baseDn', '')}")
+        groups_base = connection.get(
+            'groups_base_dn',
+            f"ou=Groups,{connection.get('base_dn', '')}",
+        )
+        group_object_classes = connection.get(
+            'group_object_classes',
+            ['groupOfNames', 'groupOfUniqueNames'],
+        )
+        group_filter = '(|{})'.format(
+            ''.join(
+                f'(objectClass={object_class})'
+                for object_class in group_object_classes
+            )
+        )
         conn.search(
             search_base=groups_base,
-            search_filter='(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=posixGroup))',
+            search_filter=group_filter,
             attributes=['cn', 'description', 'member']
         )
 
@@ -112,7 +122,8 @@ def _fetch_ldap_groups_for_server(ldap_config):
             cn = str(entry.cn) if hasattr(entry, 'cn') else ''
             groups.append({
                 'dn': str(entry.entry_dn),
-                'cn': f"{domain}.{cn}",
+                'cn': f"{prefix}{cn}",
+                'target': target_id,
                 'description': str(entry.description) if hasattr(entry, 'description') else ''
             })
 
@@ -120,20 +131,11 @@ def _fetch_ldap_groups_for_server(ldap_config):
         return groups
 
     except ImportError:
-        print("Module ldap3 non installé - retour groupes de test")
-        return _test_groups(domain)
+        print("Module ldap3 non installé - aucun groupe LDAP retourné")
+        return []
     except Exception as e:
-        print(f"Erreur LDAP ({domain}): {e}")
-        return _test_groups(domain)
-
-
-def _test_groups(domain):
-    """Groupes de test (fallback) pour un domaine donné."""
-    return [
-        {'dn': f'cn=Admins,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Admins', 'description': 'Groupe Administrateurs'},
-        {'dn': f'cn=Users,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Users', 'description': 'Groupe Utilisateurs'},
-        {'dn': f'cn=Developers,ou=Groups,dc={domain},dc=org', 'cn': f'{domain}.Developers', 'description': 'Groupe Développeurs'}
-    ]
+        print(f"Erreur LDAP ({target_id}): {e}")
+        return []
 
 
 def get_mongodb_roles(target_id=None):

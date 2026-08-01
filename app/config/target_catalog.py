@@ -66,6 +66,7 @@ class TargetDeployment(BaseModel):
 
     environment: dict[str, Any] = Field(default_factory=dict)
     midpoint_database: str | None = None
+    midpoint_roles: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TargetDefinition(BaseModel):

@@ -8,7 +8,11 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0644"
-  loop: "{{ gateway_midpoint_role_defaults[target_definition.type] }}"
+  loop: >-
+    {{
+      gateway_midpoint_role_defaults[target_definition.type]
+      + (target_definition.deployment.midpoint_roles | default([]))
+    }}
   loop_control:
     loop_var: target_role
     label: "{{ target_definition.id }} / {{ target_role.key }}"

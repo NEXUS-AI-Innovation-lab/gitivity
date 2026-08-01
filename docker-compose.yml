@@ -136,6 +136,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.gateway-http
     container_name: gitivity-http
+    env_file: .env.docker
     environment:
       TARGET_CATALOG_PATH: /app/config/targets.yaml
       LDAP_HOST: ldap
@@ -168,6 +169,8 @@ services:
     container_name: gitivity-ldap
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:${LDAP_TARGET_HOST_PORT:-10389}:10389"
+    volumes:
+      - ldap_target_data:/var/lib/apacheds
     networks:
       - gateway-network
     profiles:
@@ -361,6 +364,7 @@ volumes:
   mysql_target_data:
   postgresql_target_data:
   mongodb_target_data:
+  ldap_target_data:
   odoo_db_data:
   odoo_data:
   odoo_addons:
