@@ -19,13 +19,7 @@
                 </outbound>
             </attribute>
 {% if target_role.association_ref is defined %}
-{% set association_value = target_role.association_value | replace(
-    '{database}',
-    target_definition.deployment.midpoint_database | default('target_db', true)
-) %}
-{% if target_definition.type == 'ldap' %}
-{% set association_value = target_definition.id ~ '.' ~ association_value %}
-{% endif %}
+{% set association_value = target_role.association_value %}
             <association>
                 <ref>ri:{{ target_role.association_ref }}</ref>
                 <outbound>

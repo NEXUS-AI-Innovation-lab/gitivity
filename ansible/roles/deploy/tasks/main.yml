@@ -19,35 +19,38 @@
   loop: "{{ gateway_target_catalog.targets | default([]) }}"
   loop_control:
     label: "{{ item.id | default('unknown') }}"
+  no_log: true
 
-- name: Identify additional target instances
+- name: Identify enabled deployment targets
   ansible.builtin.set_fact:
-    gateway_additional_targets: []
+    gateway_deployment_targets: []
 
-- name: Collect enabled non-default target instances
+- name: Collect enabled deployment targets
   ansible.builtin.set_fact:
-    gateway_additional_targets: >-
-      {{ gateway_additional_targets + [item] }}
+    gateway_deployment_targets: >-
+      {{ gateway_deployment_targets + [item] }}
   loop: "{{ gateway_target_catalog.targets }}"
   loop_control:
     label: "{{ item.id }}"
   when:
     - item.enabled | default(true) | bool
-    - item.id != item.type
 
-- name: Validate deployment metadata for additional targets
+- name: Validate deployment and entitlement metadata for every target
   ansible.builtin.assert:
     that:
-      - item.type in gateway_midpoint_role_defaults
       - item.deployment is defined
       - item.deployment.environment is defined
       - item.deployment.environment | length > 0
+      - item.entitlements is defined
+      - item.entitlements.provider is defined
+      - item.entitlements.association_ref is defined
     fail_msg: >-
-      Additional target '{{ item.id }}' must define
-      deployment.environment and use a supported connector type.
-  loop: "{{ gateway_additional_targets }}"
+      Target '{{ item.id }}' must define deployment.environment, entitlement
+      discovery metadata, and use a supported connector type.
+  loop: "{{ gateway_deployment_targets }}"
   loop_control:
     label: "{{ item.id }}"
+  no_log: true
 
 - name: Initialize generated target environment
   ansible.builtin.set_fact:
@@ -66,11 +69,12 @@
         gateway_generated_target_environment_keys
         + (item.deployment.environment.keys() | list)
       }}
-  loop: "{{ gateway_additional_targets }}"
+  loop: "{{ gateway_deployment_targets }}"
   loop_control:
     label: "{{ item.id }}"
+  no_log: true
 
-- name: Reject duplicate environment variables across additional targets
+- name: Reject duplicate environment variables across targets
   ansible.builtin.assert:
     that:
       - >-
@@ -78,7 +82,7 @@
         ==
         gateway_generated_target_environment_keys | unique | length
     fail_msg: >-
-      Additional targets declare the same environment variable more than once.
+      Targets declare the same environment variable more than once.
 
 - name: Enforce Gateway application rollout contract
   ansible.builtin.assert:
@@ -115,6 +119,8 @@
       - "--exclude=midpoint-connector/build"
       - "--exclude=midpoint-connector/.gradle"
       - "--exclude=dumps"
+      # Runtime backups are managed on the server and must survive --delete.
+      - "--exclude=backups"
       - "--exclude=ansible"
     # /opt/gitivity is a deployment artefact, not a second source tree. Keeping
     # stale Python files here can make a rebuilt image differ from the checkout.
@@ -133,6 +139,7 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0600"
+  diff: false
 
 - name: Determine compose profiles
   ansible.builtin.set_fact:
@@ -149,6 +156,7 @@
   register: gateway_consumer_inspect
   changed_when: false
   failed_when: false
+  when: not ansible_check_mode
 
 - name: Stop the Gateway consumer during state migration and image rollout
   ansible.builtin.command:
@@ -157,6 +165,7 @@
       - stop
       - gitivity-consumer
   when:
+    - not ansible_check_mode
     - gateway_consumer_inspect.rc == 0
     - (gateway_consumer_inspect.stdout | from_json)[0].State.Running | bool
   register: gateway_consumer_stop
@@ -173,6 +182,7 @@
   register: gateway_redis_ping
   changed_when: false
   failed_when: false
+  when: not ansible_check_mode
 
 - name: Discover legacy mixed-case Gateway state keys
   ansible.builtin.command:
@@ -188,6 +198,7 @@
   register: gateway_redis_state_scans
   changed_when: false
   when:
+    - not ansible_check_mode
     - gateway_redis_target_key_migration_enabled | bool
     - gateway_redis_ping.rc == 0
 
@@ -204,6 +215,7 @@
         | list
       }}
   when:
+    - not ansible_check_mode
     - gateway_redis_target_key_migration_enabled | bool
     - gateway_redis_ping.rc == 0
 
@@ -226,6 +238,7 @@
   failed_when:
     - gateway_redis_key_migrations.rc != 0
     - "'no such key' not in (gateway_redis_key_migrations.stderr | lower)"
+  when: not ansible_check_mode
 
 - name: Pull / build Docker images
   ansible.builtin.command:
@@ -241,26 +254,45 @@
   register: compose_up
   changed_when: compose_up.rc == 0
 
-- name: Seed declared LDAP target groups idempotently
+- name: Bootstrap and discover native target entitlements
   ansible.builtin.command:
     argv:
       - docker
       - exec
       - gitivity-http
       - python
-      - /app/seed_ldap_groups.py
+      - /app/target_entitlements.py
       - --target
       - "{{ item.id }}"
-  loop: "{{ gateway_target_catalog.targets }}"
+  loop: "{{ gateway_deployment_targets }}"
   loop_control:
     label: "{{ item.id }}"
   when:
+    - not ansible_check_mode
     - with_targets | bool
     - item.enabled | default(true) | bool
-    - item.type == 'ldap'
-    - (item.provisioning | default({})).get('seed_groups', []) | length > 0
-  register: ldap_group_seed
-  changed_when: (ldap_group_seed.stdout | from_json).changed | bool
+  register: gateway_entitlement_sync
+  changed_when: >-
+    gateway_entitlement_sync.rc == 0 and
+    (gateway_entitlement_sync.stdout | default('{}', true) | from_json).get('changed', false) | bool
+
+- name: Store normalized entitlement manifests for MidPoint generation
+  ansible.builtin.set_fact:
+    gateway_entitlement_manifests: >-
+      {{
+        gateway_entitlement_sync.results
+        | default([])
+        | selectattr('stdout', 'defined')
+        | map(attribute='stdout')
+        | map('from_json')
+        | list
+      }}
+  when: not ansible_check_mode
+
+- name: Initialize entitlement manifests during check mode
+  ansible.builtin.set_fact:
+    gateway_entitlement_manifests: []
+  when: ansible_check_mode
 
 - name: Wait for the Gateway API after rollout
   ansible.builtin.uri:
@@ -271,6 +303,7 @@
   until: gateway_api_rollout_health.status == 200
   retries: "{{ (service_wait_timeout | int) // (service_wait_delay | int) }}"
   delay: "{{ service_wait_delay }}"
+  when: not ansible_check_mode
 
 - name: Wait for the Gateway consumer container to become healthy
   ansible.builtin.command:
@@ -285,6 +318,7 @@
   retries: "{{ (gateway_consumer_wait_timeout | int) // (service_wait_delay | int) }}"
   delay: "{{ service_wait_delay }}"
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Read image IDs used by the Gateway API and consumer
   ansible.builtin.command:
@@ -299,6 +333,7 @@
     - gitivity-consumer
   register: gateway_runtime_image_ids
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Require API and consumer to run the same rebuilt image
   ansible.builtin.assert:
@@ -306,6 +341,7 @@
       - gateway_runtime_image_ids.results | map(attribute='stdout') | unique | length == 1
     fail_msg: >-
       Gateway API and consumer are not running the same image after rollout.
+  when: not ansible_check_mode
 
 - name: Verify the RabbitMQ queue has an attached consumer
   ansible.builtin.command:
@@ -327,3 +363,4 @@
   retries: "{{ (gateway_consumer_wait_timeout | int) // (service_wait_delay | int) }}"
   delay: "{{ service_wait_delay }}"
   changed_when: false
+  when: not ansible_check_mode

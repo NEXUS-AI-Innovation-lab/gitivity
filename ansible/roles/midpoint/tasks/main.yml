@@ -196,12 +196,12 @@
   ansible.builtin.set_fact:
     gateway_generated_role_files: []
 
-- name: Generate roles for additional target instances
+- name: Generate roles uniformly from discovered native entitlements
   ansible.builtin.include_tasks: generate_target_roles.yml
-  loop: "{{ gateway_additional_targets | default([]) }}"
+  loop: "{{ gateway_entitlement_manifests | default([]) }}"
   loop_control:
-    loop_var: target_definition
-    label: "{{ target_definition.id }}"
+    loop_var: target_manifest
+    label: "{{ target_manifest.target_id }}"
 
 - name: Find generated MidPoint role XML files
   ansible.builtin.find:
@@ -221,7 +221,6 @@
 - name: Find all role XML files
   ansible.builtin.find:
     paths:
-      - "{{ project_dir }}/midpoint/roles"
       - "{{ project_dir }}/midpoint/generated-roles"
     patterns: "*.xml"
   register: role_files
@@ -242,6 +241,35 @@
   loop_control:
     label: "{{ item.path | basename }}"
   register: role_contents
+
+# MidPoint applies a normalized uniqueness constraint to role names. Names
+# such as "Gateway - MySQL readonly" and "Gateway - MySQL - readonly" collide
+# even though their OIDs differ. Rename the still-functional legacy objects
+# before creating their generated replacements; assignments refer to OIDs and
+# therefore remain intact.
+- name: Rename legacy MidPoint roles before creating their replacements
+  ansible.builtin.uri:
+    url: "{{ midpoint_url }}/ws/rest/roles/{{ item.role_oid }}"
+    method: PATCH
+    url_username: "{{ midpoint_admin_user }}"
+    url_password: "{{ midpoint_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      objectModification:
+        itemDelta:
+          - modificationType: replace
+            path: name
+            value:
+              - "{{ item.role_name }} [legacy]"
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    status_code: [200, 204, 404]
+  loop: "{{ gateway_legacy_midpoint_roles }}"
+  loop_control:
+    label: "{{ item.role_name }}"
+  no_log: true
 
 - name: Import roles into MidPoint (POST, ignore 409 = already exists)
   ansible.builtin.uri:
@@ -278,12 +306,47 @@
     label: "{{ item.item.item.path | basename }}"
   when: item.status in [409, 500]
 
+- name: Reconcile durable entitlement inventory after successful role upsert
+  ansible.builtin.uri:
+    url: "http://{{ service_bind_ip }}:8100/api/v1/entitlement-removals/reconcile"
+    method: POST
+    body_format: json
+    body: "{{ gateway_entitlement_manifests | default([]) }}"
+    headers:
+      X-Gateway-Reconcile-Token: "{{ midpoint_admin_password }}"
+    status_code: 200
+  when: gateway_entitlement_manifests | default([]) | length > 0
+
+- name: Register obsolete static roles for durable approval-based cleanup
+  ansible.builtin.uri:
+    url: "http://{{ service_bind_ip }}:8100/api/v1/entitlement-removals/legacy"
+    method: POST
+    body_format: json
+    body:
+      roles: "{{ gateway_legacy_midpoint_roles }}"
+      manifests: "{{ gateway_entitlement_manifests | default([]) }}"
+    headers:
+      X-Gateway-Reconcile-Token: "{{ midpoint_admin_password }}"
+    status_code: 200
+    timeout: 600
+  register: gateway_legacy_migration
+  when: gateway_legacy_midpoint_roles | length > 0
+
+- name: Require every legacy role to have a discovered replacement
+  ansible.builtin.assert:
+    that:
+      - gateway_legacy_migration.json.skipped_roles | default([]) | length == 0
+    fail_msg: >-
+      Some legacy roles were preserved because their native replacement was
+      not discovered: {{ gateway_legacy_migration.json.skipped_roles | default([]) }}
+  when: gateway_legacy_midpoint_roles | length > 0
+
 # ------------------------------------------------------------------
 # 6. Trigger entitlement shadow import
 # ------------------------------------------------------------------
-- name: Start LDAP group entitlement import task
+- name: Start entitlement shadow import tasks
   ansible.builtin.uri:
-    url: "{{ midpoint_url }}/ws/rest/resources/{{ resource_oid }}/import/CustomLdapGroupObjectClass"
+    url: "{{ midpoint_url }}/ws/rest/resources/{{ resource_oid }}/import/{{ item }}"
     method: POST
     url_username: "{{ midpoint_admin_user }}"
     url_password: "{{ midpoint_admin_password }}"
@@ -293,34 +356,21 @@
       Accept: application/json
       Content-Type: application/json
     status_code: [200, 201, 202, 303]
-  register: ldap_entitlement_import
+  loop:
+    - CustomLdapGroupObjectClass
+    - CustomPostgresqlProfileObjectClass
+    - CustomMysqlProfileObjectClass
+    - CustomMongoDbRoleObjectClass
+    - CustomOdooGroupObjectClass
+  register: entitlement_imports
   when: with_targets | bool
 
-- name: Show LDAP group entitlement import task location
+- name: Show entitlement import task locations
   ansible.builtin.debug:
     msg: >-
-      LDAP group entitlement import started: {{ ldap_entitlement_import.location
+      {{ item.item }} import started: {{ item.location
       | default('task accepted by MidPoint') }}
-  when: with_targets | bool
-
-- name: Start MongoDB entitlement import task
-  ansible.builtin.uri:
-    url: "{{ midpoint_url }}/ws/rest/resources/{{ resource_oid }}/import/CustomMongoDbRoleObjectClass"
-    method: POST
-    url_username: "{{ midpoint_admin_user }}"
-    url_password: "{{ midpoint_admin_password }}"
-    force_basic_auth: true
-    follow_redirects: none
-    headers:
-      Accept: application/json
-      Content-Type: application/json
-    status_code: [200, 201, 202, 303]
-  register: mongodb_entitlement_import
-  when: with_targets | bool
-
-- name: Show MongoDB entitlement import task location
-  ansible.builtin.debug:
-    msg: >-
-      MongoDB entitlement import started: {{ mongodb_entitlement_import.location
-      | default('task accepted by MidPoint') }}
+  loop: "{{ entitlement_imports.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
   when: with_targets | bool

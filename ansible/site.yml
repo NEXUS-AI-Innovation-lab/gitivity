@@ -44,7 +44,11 @@
 
     # 4 — Build & deploy MidPoint connector, import resource + roles
     - role: midpoint
-      when: with_midpoint | default(true) | bool
+      # Connector discovery, entitlement generation, and imports require the
+      # freshly deployed runtime and cannot be simulated meaningfully.
+      when:
+        - with_midpoint | default(true) | bool
+        - not ansible_check_mode
 
   post_tasks:
     - name: Print service URLs
@@ -57,5 +61,5 @@
           ║  Gateway HTTP     →  http://{{ server_ip }}:5100
           ║  RabbitMQ UI      →  http://{{ server_ip }}:15672  (guest/guest)
           ║  MidPoint         →  http://{{ midpoint_host if midpoint_external | bool else server_ip }}:{{ midpoint_port }}/midpoint
-          ║                       ({{ midpoint_admin_user }} / {{ midpoint_admin_password }})
+          ║                       (user: {{ midpoint_admin_user }})
           ╚══════════════════════════════════════════════════════════╝

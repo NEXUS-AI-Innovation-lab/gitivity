@@ -1,4 +1,14 @@
 ---
+- name: Resolve catalogue definition for {{ target_manifest.target_id }}
+  ansible.builtin.set_fact:
+    target_definition: >-
+      {{
+        gateway_deployment_targets
+        | selectattr('id', 'equalto', target_manifest.target_id)
+        | list
+        | first
+      }}
+
 - name: Generate MidPoint roles for {{ target_definition.id }}
   ansible.builtin.template:
     src: generated-target-role.xml.j2
@@ -8,11 +18,7 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0644"
-  loop: >-
-    {{
-      gateway_midpoint_role_defaults[target_definition.type]
-      + (target_definition.deployment.midpoint_roles | default([]))
-    }}
+  loop: "{{ target_manifest.entitlements }}"
   loop_control:
     loop_var: target_role
     label: "{{ target_definition.id }} / {{ target_role.key }}"
