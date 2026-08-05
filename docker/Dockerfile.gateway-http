@@ -7,12 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir flask ldap3 'pymongo>=4.6,<5' 'PyYAML>=6,<7'
+RUN pip install --no-cache-dir flask ldap3 'pymongo>=4.6,<5' 'PyYAML>=6,<7' \
+    'PyMySQL>=1.1,<2' 'psycopg2-binary>=2.9,<3'
 
 # Copy application files
 COPY gateway-http/gateway-http.py ./gateway-http.py
-COPY gateway-http/seed_ldap_groups.py ./seed_ldap_groups.py
-COPY gateway-http/config.json ./config.json
+COPY gateway-http/target_entitlements.py ./target_entitlements.py
 COPY config ./config
 
 # Expose port

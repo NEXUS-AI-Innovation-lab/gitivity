@@ -54,19 +54,18 @@ class TargetRouting(BaseModel):
 
 
 class EntitlementConfig(BaseModel):
-    """Optional entitlement discovery metadata."""
+    """Native entitlement discovery and MidPoint association metadata."""
 
     provider: str
     identifier: str = "{name}"
-    fallback: list[str] = Field(default_factory=list)
+    association_ref: str
+    base_name: str = "gateway-base"
 
 
 class TargetDeployment(BaseModel):
     """Deployment-only values used by Ansible artifact generation."""
 
     environment: dict[str, Any] = Field(default_factory=dict)
-    midpoint_database: str | None = None
-    midpoint_roles: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TargetDefinition(BaseModel):

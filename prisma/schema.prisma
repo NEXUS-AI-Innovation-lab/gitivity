@@ -43,6 +43,15 @@ enum TargetService {
   MONGODB
 }
 
+enum EntitlementRemovalStatus {
+  PENDING
+  KEPT
+  APPROVED
+  CANCELLED
+  COMPLETED
+  FAILED
+}
+
 // Main Models
 
 model ProvisioningOperation {
@@ -135,6 +144,52 @@ model AuditLog {
   @@index([operation_id])
   @@index([created_at])
   @@index([event_type])
+}
+
+model EntitlementInventory {
+  id                String   @id @default(uuid())
+  target_id         String
+  entitlement_key   String
+  native_name       String
+  role_oid          String
+  role_name         String
+  association_ref   String
+  association_value String
+  active            Boolean  @default(true)
+  first_seen_at     DateTime @default(now())
+  last_seen_at      DateTime @default(now())
+  missing_since     DateTime?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@unique([target_id, entitlement_key])
+  @@index([active])
+}
+
+model EntitlementRemovalRequest {
+  id                    String                   @id @default(uuid())
+  inventory_id          String
+  target_id             String
+  entitlement_key       String
+  native_name           String
+  role_oid              String
+  role_name             String
+  replacement_role_oid  String?
+  replacement_role_name String?
+  status                EntitlementRemovalStatus @default(PENDING)
+  approvers             Json
+  current_approver_index Int                      @default(0)
+  decision_token_hash   String?
+  token_expires_at      DateTime?
+  decision_reason       String?
+  decided_by            String?
+  decided_at            DateTime?
+  execution_result      Json?
+  created_at            DateTime                 @default(now())
+  updated_at            DateTime                 @updatedAt
+
+  @@index([status])
+  @@index([inventory_id])
 }
 
 model DeadLetterQueue {

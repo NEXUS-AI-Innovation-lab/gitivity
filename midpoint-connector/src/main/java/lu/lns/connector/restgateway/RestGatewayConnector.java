@@ -148,9 +148,11 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
 
         // MySQL grants (comma-separated privileges like "SELECT, INSERT, UPDATE")
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("mysqlGrants", String.class));
+        userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("mysqlRole", String.class));
 
         // PostgreSQL grants (comma-separated privileges like "SELECT, INSERT, UPDATE")
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("postgresqlGrants", String.class));
+        userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("postgresqlRole", String.class));
 
         // MongoDB roles (database-scoped entitlements)
         AttributeInfoBuilder mongodbRolesBuilder = new AttributeInfoBuilder("mongodbRoles", String.class);
@@ -161,6 +163,9 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
         // Odoo provisioning control
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("odooCreateUser", Boolean.class));
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("odooCreateEmployee", Boolean.class));
+        AttributeInfoBuilder odooGroupsBuilder = new AttributeInfoBuilder("odooGroups", String.class);
+        odooGroupsBuilder.setMultiValued(true);
+        userClassBuilder.addAttributeInfo(odooGroupsBuilder.build());
 
         // Employee attributes
         userClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("employeeNumber", String.class));
@@ -230,6 +235,14 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
         mysqlProfileClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("grants", String.class));
         mysqlProfileClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("description", String.class));
         schemaBuilder.defineObjectClass(mysqlProfileClassBuilder.build());
+
+        // OdooGroup ObjectClass (Entitlement)
+        ObjectClassInfoBuilder odooGroupClassBuilder = new ObjectClassInfoBuilder();
+        odooGroupClassBuilder.setType("OdooGroup");
+        odooGroupClassBuilder.addAttributeInfo(Name.INFO);
+        odooGroupClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("groupName", String.class));
+        odooGroupClassBuilder.addAttributeInfo(AttributeInfoBuilder.build("description", String.class));
+        schemaBuilder.defineObjectClass(odooGroupClassBuilder.build());
 
         // MongoDbRole ObjectClass (Entitlement)
         ObjectClassInfoBuilder mongoRoleClassBuilder = new ObjectClassInfoBuilder();
@@ -467,6 +480,27 @@ public class RestGatewayConnector implements PoolableConnector, CreateOp, Update
                 builder.addAttribute("database", database);
                 builder.addAttribute("description", description);
 
+                if (!handler.handle(builder.build())) {
+                    break;
+                }
+            }
+            return;
+        }
+
+        if ("OdooGroup".equals(objectClassName)) {
+            List<Map<String, Object>> groups = getHttpClient().fetchOdooGroups();
+            for (Map<String, Object> group : groups) {
+                String groupName = (String) group.get("groupName");
+                String description = (String) group.get("description");
+                if (query != null && !query.isEmpty() && !query.equals(groupName)) {
+                    continue;
+                }
+                ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+                builder.setObjectClass(objectClass);
+                builder.setUid(groupName);
+                builder.setName(groupName);
+                builder.addAttribute("groupName", groupName);
+                builder.addAttribute("description", description);
                 if (!handler.handle(builder.build())) {
                     break;
                 }

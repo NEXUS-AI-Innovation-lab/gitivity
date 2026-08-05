@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     AUTO_APPROVE_DELAY: int = 5  # seconds before auto-approval (APPROVAL_MODE=auto only)
     ADMIN_APPROVAL_EMAIL: str = "samiourrad2005@example.com"  # fallback when approvers.json is empty
     GATEWAY_EXTERNAL_URL: str = "http://localhost:8100"  # Public URL used in approval email links
+    GATEWAY_HTTP_URL: str = "http://gateway-http:5100"
+    ENTITLEMENT_DECISION_TOKEN_DAYS: int = 7
+    ENTITLEMENT_RECONCILE_TOKEN: str = ""
 
     # SMTP (approval + confirmation emails)
     SMTP_HOST: str = "smtp.gmail.com"

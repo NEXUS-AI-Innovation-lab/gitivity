@@ -1,4 +1,6 @@
 """MidPoint API client for managing connectors"""
+
+import copy
 import logging
 from typing import Any
 
@@ -22,9 +24,14 @@ class MidPointClient:
         password: str | None = None,
         timeout: int = 30,
     ):
-        self.base_url = (base_url or getattr(settings, 'MIDPOINT_URL', 'http://localhost:8080/midpoint')).rstrip('/')
-        self.username = username or getattr(settings, 'MIDPOINT_USERNAME', 'administrator')
-        self.password = password or getattr(settings, 'MIDPOINT_PASSWORD', '5ecr3t')
+        self.base_url = (
+            base_url
+            or getattr(settings, "MIDPOINT_URL", "http://localhost:8080/midpoint")
+        ).rstrip("/")
+        self.username = username or getattr(
+            settings, "MIDPOINT_USERNAME", "administrator"
+        )
+        self.password = password or getattr(settings, "MIDPOINT_PASSWORD", "5ecr3t")
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
@@ -38,7 +45,7 @@ class MidPointClient:
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/json",
-                }
+                },
             )
         return self._client
 
@@ -53,7 +60,12 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.get("/ws/rest")
-            return response.status_code in (200, 401, 403, 404)  # Any response means MidPoint is up
+            return response.status_code in (
+                200,
+                401,
+                403,
+                404,
+            )  # Any response means MidPoint is up
         except Exception as e:
             logger.debug(f"MidPoint health check failed: {e}")
             return False
@@ -67,8 +79,7 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.get(
-                "/ws/rest/resources",
-                headers={"Accept": "application/json"}
+                "/ws/rest/resources", headers={"Accept": "application/json"}
             )
             response.raise_for_status()
 
@@ -79,7 +90,9 @@ class MidPointClient:
                 resources = data["object"]
             return resources
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to fetch MidPoint resources: {e.response.status_code}")
+            logger.error(
+                f"Failed to fetch MidPoint resources: {e.response.status_code}"
+            )
             raise
         except Exception as e:
             logger.error(f"Error fetching MidPoint resources: {e}")
@@ -97,13 +110,14 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.get(
-                f"/ws/rest/resources/{oid}",
-                headers={"Accept": "application/json"}
+                f"/ws/rest/resources/{oid}", headers={"Accept": "application/json"}
             )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to fetch MidPoint resource {oid}: {e.response.status_code}")
+            logger.error(
+                f"Failed to fetch MidPoint resource {oid}: {e.response.status_code}"
+            )
             raise
         except Exception as e:
             logger.error(f"Error fetching MidPoint resource {oid}: {e}")
@@ -121,25 +135,22 @@ class MidPointClient:
         try:
             client = await self._get_client()
             response = await client.post(
-                f"/ws/rest/resources/{oid}/test",
-                headers={"Accept": "application/json"}
+                f"/ws/rest/resources/{oid}/test", headers={"Accept": "application/json"}
             )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to test MidPoint resource {oid}: {e.response.status_code}")
+            logger.error(
+                f"Failed to test MidPoint resource {oid}: {e.response.status_code}"
+            )
             return {
                 "success": False,
                 "error": f"HTTP {e.response.status_code}",
-                "message": str(e)
+                "message": str(e),
             }
         except Exception as e:
             logger.error(f"Error testing MidPoint resource {oid}: {e}")
-            return {
-                "success": False,
-                "error": "connection_error",
-                "message": str(e)
-            }
+            return {"success": False, "error": "connection_error", "message": str(e)}
 
     async def get_resource_capabilities(self, oid: str) -> dict[str, Any]:
         """Get capabilities of a resource
@@ -154,7 +165,7 @@ class MidPointClient:
             client = await self._get_client()
             response = await client.get(
                 f"/ws/rest/resources/{oid}/capabilities",
-                headers={"Accept": "application/json"}
+                headers={"Accept": "application/json"},
             )
             response.raise_for_status()
             return response.json()
@@ -162,7 +173,9 @@ class MidPointClient:
             logger.error(f"Error fetching capabilities for resource {oid}: {e}")
             return {}
 
-    async def update_resource(self, oid: str, modifications: dict[str, Any]) -> dict[str, Any]:
+    async def update_resource(
+        self, oid: str, modifications: dict[str, Any]
+    ) -> dict[str, Any]:
         """Update a resource configuration
 
         Args:
@@ -180,13 +193,15 @@ class MidPointClient:
                 json=modifications,
                 headers={
                     "Accept": "application/json",
-                    "Content-Type": "application/json"
-                }
+                    "Content-Type": "application/json",
+                },
             )
             response.raise_for_status()
             return await self.get_resource(oid)
         except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to update MidPoint resource {oid}: {e.response.status_code}")
+            logger.error(
+                f"Failed to update MidPoint resource {oid}: {e.response.status_code}"
+            )
             raise
         except Exception as e:
             logger.error(f"Error updating MidPoint resource {oid}: {e}")
@@ -238,7 +253,9 @@ class MidPointClient:
             data = response.json()
 
             # Log raw response keys for debugging
-            logger.debug(f"MidPoint search response for {username}: {list(data.keys())}")
+            logger.debug(
+                f"MidPoint search response for {username}: {list(data.keys())}"
+            )
 
             # Format 1: {"user": {...}}
             user = data.get("user")
@@ -274,12 +291,16 @@ class MidPointClient:
                 if isinstance(objs, list) and len(objs) > 0:
                     return objs[0]
 
-            logger.info(f"User not found in MidPoint: {username} (response keys: {list(data.keys())})")
+            logger.info(
+                f"User not found in MidPoint: {username} (response keys: {list(data.keys())})"
+            )
             return None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None
-            logger.error(f"Failed to search MidPoint user {username}: {e.response.status_code}")
+            logger.error(
+                f"Failed to search MidPoint user {username}: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error searching MidPoint user {username}: {e}")
@@ -370,15 +391,218 @@ class MidPointClient:
                 },
             )
             response.raise_for_status()
-            logger.info(
-                f"Successfully unassigned role {role_oid} from user {user_oid}"
-            )
+            logger.info(f"Successfully unassigned role {role_oid} from user {user_oid}")
             return True
         except Exception as e:
             logger.error(
                 f"Failed to unassign role {role_oid} from user {user_oid}: {e}"
             )
             return False
+
+    @staticmethod
+    def _object_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Normalize the JSON collection formats returned by MidPoint."""
+        value: Any = payload.get("object", payload.get("objectList", {}))
+        if isinstance(value, dict):
+            value = value.get("object", value.get("list", []))
+        if isinstance(value, dict):
+            return [value]
+        return value if isinstance(value, list) else []
+
+    @staticmethod
+    def _references_role(value: Any, role_oid: str) -> bool:
+        if isinstance(value, dict):
+            reference = value.get("targetRef")
+            if isinstance(reference, dict) and reference.get("oid") == role_oid:
+                return True
+        return False
+
+    async def remove_role_everywhere(self, role_oid: str) -> dict[str, Any]:
+        """Remove direct references to a role from all assignable objects, then delete it.
+
+        Values returned by MidPoint are sent back verbatim in delete deltas. This also
+        removes assignments carrying activation or relation metadata, not only the
+        simplest ``targetRef`` form.
+        """
+        client = await self._get_client()
+        role_response = await client.get(f"/ws/rest/roles/{role_oid}")
+        if role_response.status_code == 404:
+            return {
+                "role_deleted": False,
+                "already_absent": True,
+                "references_removed": 0,
+            }
+        role_response.raise_for_status()
+
+        references_removed = 0
+        modified_objects = 0
+        for endpoint in ("users", "roles", "orgs", "services"):
+            response = await client.get(f"/ws/rest/{endpoint}")
+            response.raise_for_status()
+            for item in self._object_list(response.json()):
+                oid = item.get("oid")
+                if not oid or oid == role_oid:
+                    continue
+                detail_response = await client.get(f"/ws/rest/{endpoint}/{oid}")
+                detail_response.raise_for_status()
+                detail_payload = detail_response.json()
+                singular = {
+                    "users": "user",
+                    "roles": "role",
+                    "orgs": "org",
+                    "services": "service",
+                }[endpoint]
+                item = detail_payload.get(singular, detail_payload)
+                deltas = []
+                for path in ("assignment", "inducement"):
+                    values = item.get(path, [])
+                    if isinstance(values, dict):
+                        values = [values]
+                    matching = [
+                        value
+                        for value in values
+                        if self._references_role(value, role_oid)
+                    ]
+                    if matching:
+                        deltas.append(
+                            {
+                                "modificationType": "delete",
+                                "path": path,
+                                "value": matching,
+                            }
+                        )
+                        references_removed += len(matching)
+                if deltas:
+                    patch_response = await client.patch(
+                        f"/ws/rest/{endpoint}/{oid}",
+                        json={"objectModification": {"itemDelta": deltas}},
+                    )
+                    patch_response.raise_for_status()
+                    modified_objects += 1
+
+        delete_response = await client.delete(f"/ws/rest/roles/{role_oid}")
+        if delete_response.status_code != 404:
+            delete_response.raise_for_status()
+        return {
+            "role_deleted": delete_response.status_code != 404,
+            "already_absent": delete_response.status_code == 404,
+            "references_removed": references_removed,
+            "objects_modified": modified_objects,
+        }
+
+    async def replace_role_everywhere(
+        self, old_role_oid: str, new_role_oid: str
+    ) -> dict[str, Any]:
+        """Replace every direct old-role reference while preserving assignment metadata."""
+        if old_role_oid == new_role_oid:
+            raise ValueError("Old and replacement role OIDs must differ")
+        client = await self._get_client()
+        replacement = await client.get(f"/ws/rest/roles/{new_role_oid}")
+        replacement.raise_for_status()
+        old = await client.get(f"/ws/rest/roles/{old_role_oid}")
+        if old.status_code == 404:
+            return {
+                "old_role_absent": True,
+                "references_replaced": 0,
+                "objects_modified": 0,
+            }
+        old.raise_for_status()
+
+        replaced = 0
+        modified = 0
+        for endpoint in ("users", "roles", "orgs", "services"):
+            response = await client.get(f"/ws/rest/{endpoint}")
+            response.raise_for_status()
+            for summary in self._object_list(response.json()):
+                oid = summary.get("oid")
+                if not oid or oid in {old_role_oid, new_role_oid}:
+                    continue
+                detail = await client.get(f"/ws/rest/{endpoint}/{oid}")
+                detail.raise_for_status()
+                singular = {
+                    "users": "user",
+                    "roles": "role",
+                    "orgs": "org",
+                    "services": "service",
+                }[endpoint]
+                obj = detail.json().get(singular, detail.json())
+                object_modified = False
+                for path in ("assignment", "inducement"):
+                    values = obj.get(path, [])
+                    if isinstance(values, dict):
+                        values = [values]
+                    old_values = [
+                        value
+                        for value in values
+                        if self._references_role(value, old_role_oid)
+                    ]
+                    if not old_values:
+                        continue
+                    has_new = any(
+                        self._references_role(value, new_role_oid) for value in values
+                    )
+                    if not has_new:
+                        writable_values = []
+                        for old_value in old_values:
+                            value = copy.deepcopy(old_value)
+                            for metadata_key in ("@id", "@metadata", "@ns"):
+                                value.pop(metadata_key, None)
+                            value["targetRef"]["oid"] = new_role_oid
+                            value["targetRef"].pop("targetName", None)
+                            activation = value.get("activation")
+                            if isinstance(activation, dict):
+                                activation.pop("effectiveStatus", None)
+                                activation.pop("validityStatus", None)
+                                if not activation:
+                                    value.pop("activation")
+                            writable_values.append(value)
+                        add = await client.patch(
+                            f"/ws/rest/{endpoint}/{oid}",
+                            json={
+                                "objectModification": {
+                                    "itemDelta": [
+                                        {
+                                            "modificationType": "add",
+                                            "path": path,
+                                            "value": writable_values,
+                                        }
+                                    ]
+                                }
+                            },
+                        )
+                        add.raise_for_status()
+                    delete_selectors = []
+                    for old_value in old_values:
+                        container_id = old_value.get("@id")
+                        if container_id is None:
+                            raise ValueError(
+                                f"MidPoint {path} referencing {old_role_oid} has no @id"
+                            )
+                        delete_selectors.append({"@id": container_id})
+                    delete = await client.patch(
+                        f"/ws/rest/{endpoint}/{oid}",
+                        json={
+                            "objectModification": {
+                                "itemDelta": [
+                                    {
+                                        "modificationType": "delete",
+                                        "path": path,
+                                        "value": delete_selectors,
+                                    }
+                                ]
+                            }
+                        },
+                    )
+                    delete.raise_for_status()
+                    object_modified = True
+                    replaced += len(old_values)
+                if object_modified:
+                    modified += 1
+        return {
+            "old_role_absent": False,
+            "references_replaced": replaced,
+            "objects_modified": modified,
+        }
 
     def _sanitize_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Remove sensitive data from configuration

@@ -114,8 +114,6 @@ class MongoDBConnector(ProvisioningConnector):
                 normalized.append({"role": role_name, "db": role_db})
                 seen.add(key)
 
-        if not normalized:
-            normalized.append({"role": "read", "db": database})
         return normalized
 
     async def _user_exists(self, username: str, database: str) -> bool:

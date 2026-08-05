@@ -1,4 +1,6 @@
 import pytest
+import sys
+import types
 
 from app.core.broker.rabbitmq_consumer import RabbitMQConsumer
 from app.utils.enums import OperationType, TargetService
@@ -56,6 +58,23 @@ async def test_entitlement_attribute_routes_without_role_alias():
 
 
 @pytest.mark.asyncio
+async def test_namespaced_entitlements_are_native_for_selected_target():
+    messages = await consumer_without_dependencies()._parse_midpoint_format({
+        "operation": "CREATE",
+        "uid": "user-oid-namespaced",
+        "attributes": {
+            "username": "alice",
+            "password": "A7!vQ2#kL9@z",
+            "roles": ["mongodb"],
+            "mongodbRoles": ["mongodb.readWrite@target_db"],
+        },
+    })
+
+    assert len(messages) == 1
+    assert messages[0].user_data.attributes["mongodbRoles"] == ["readWrite@target_db"]
+
+
+@pytest.mark.asyncio
 async def test_explicit_target_role_wins_over_shared_family_entitlement():
     messages = await consumer_without_dependencies()._parse_midpoint_format({
         "operation": "CREATE",
@@ -89,3 +108,39 @@ async def test_ldap_role_removal_uses_configured_cleanup_mode():
     assert len(messages) == 1
     assert messages[0].target_id == "ldap"
     assert messages[0].operation_type == OperationType.UPDATE_USER
+
+
+@pytest.mark.asyncio
+async def test_delete_enriches_roles_from_midpoint_assignments(monkeypatch):
+    class FakeMidPointClient:
+        async def get_user(self, request_id):
+            assert request_id == "user-oid-delete"
+            return {
+                "assignment": [
+                    {
+                        "targetRef": {
+                            "oid": "role-1",
+                            "type": "c:RoleType",
+                            "targetName": {"orig": "mongodb"},
+                        }
+                    }
+                ]
+            }
+
+        async def get_role(self, oid):
+            raise AssertionError("targetName should avoid role lookup")
+
+    fake_module = types.SimpleNamespace(midpoint_client=FakeMidPointClient())
+    monkeypatch.setitem(sys.modules, "app.services.midpoint_client", fake_module)
+
+    messages = await consumer_without_dependencies()._parse_midpoint_format({
+        "operation": "DELETE",
+        "uid": "user-oid-delete",
+        "attributes": {
+            "username": "MongoDB_TEST",
+        },
+    })
+
+    assert [message.target_id for message in messages] == ["mongodb"]
+    assert messages[0].operation_type == OperationType.DELETE_USER
+    assert messages[0].user_data.roles == ["mongodb"]

@@ -11,25 +11,16 @@ import re
 from datetime import datetime
 import yaml
 
+from target_entitlements import synchronize
+
 app = Flask(__name__)
 
 # Charger la configuration
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 TARGET_CATALOG_FILE = os.getenv(
     'TARGET_CATALOG_PATH',
     os.path.join(os.path.dirname(__file__), 'config', 'targets.yaml'),
 )
 ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
-
-def load_config():
-    """Charge la configuration depuis config.json"""
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Erreur chargement config: {e}")
-        return {}
-
 
 def load_targets():
     """Load targets.yaml and resolve its ${VAR:-default} placeholders."""
@@ -74,7 +65,7 @@ def _fetch_ldap_groups_for_target(target):
     """Fetch one target's groups, namespacing additional LDAP instances."""
     target_id = target['id']
     connection = target.get('connection', {})
-    prefix = '' if target_id == target.get('type') else f'{target_id}.'
+    prefix = f'{target_id}.'
 
     if not connection.get('host'):
         return []
@@ -130,66 +121,17 @@ def _fetch_ldap_groups_for_target(target):
         conn.unbind()
         return groups
 
-    except ImportError:
-        print("Module ldap3 non installé - aucun groupe LDAP retourné")
-        return []
     except Exception as e:
-        print(f"Erreur LDAP ({target_id}): {e}")
-        return []
+        raise RuntimeError(f"LDAP entitlement discovery failed for {target_id}: {e}") from e
 
 
-def get_mongodb_roles(target_id=None):
-    """Discover built-in and custom roles from the configured MongoDB database.
-
-    The static configuration is only a resilience fallback, so MidPoint can
-    still load the resource schema while MongoDB is restarting.
-    """
-    target = get_target(target_id, 'mongodb') or {}
-    connection = target.get('connection', {})
-    entitlements = target.get('entitlements', {})
-    database = connection.get('database', 'target_db')
-    fallback = [
-        {
-            'roleName': role,
-            'database': database,
-            'description': 'Rôle MongoDB de secours',
-        }
-        for role in entitlements.get('fallback', [])
+def get_manifests(target_type):
+    """Discover real entitlements for every enabled target of a family."""
+    return [
+        synchronize(target)
+        for target in load_targets()
+        if target.get('type') == target_type
     ]
-
-    try:
-        from pymongo import MongoClient
-
-        client = MongoClient(
-            host=connection.get('host', 'localhost'),
-            port=int(connection.get('port', 27017)),
-            username=connection.get('user', 'root'),
-            password=connection.get('password', ''),
-            authSource=connection.get('auth_source', 'admin'),
-            serverSelectionTimeoutMS=5000,
-        )
-        client.admin.command('ping')
-        result = client[database].command({
-            'rolesInfo': 1,
-            'showBuiltinRoles': True,
-            'showPrivileges': False,
-        })
-        roles = []
-        for role in result.get('roles', []):
-            role_name = role.get('role')
-            role_db = role.get('db', database)
-            if not role_name or role_db != database:
-                continue
-            roles.append({
-                'roleName': role_name,
-                'database': role_db,
-                'description': 'Rôle MongoDB intégré' if role.get('isBuiltin') else 'Rôle MongoDB personnalisé',
-            })
-        client.close()
-        return sorted(roles, key=lambda item: item['roleName'].lower()) or fallback
-    except Exception as exc:
-        print(f"MongoDB indisponible pour la découverte des rôles: {exc}")
-        return fallback
 
 def print_separator():
     print("=" * 60)
@@ -286,6 +228,21 @@ def list_targets():
     ]), 200
 
 
+@app.route('/entitlements/manifest', methods=['GET'])
+def entitlement_manifest():
+    """Return one fail-closed normalized target entitlement manifest."""
+    target_id = request.args.get('target')
+    if not target_id:
+        return jsonify({'error': 'target query parameter is required'}), 400
+    try:
+        target = get_target(target_id)
+        if not target:
+            return jsonify({'error': f'unknown target: {target_id}'}), 404
+        return jsonify(synchronize(target)), 200
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 503
+
+
 # ============================================================
 # ENDPOINTS ENTITLEMENTS
 # ============================================================
@@ -306,17 +263,17 @@ def get_entitlements_ldap_groups():
 
 @app.route('/entitlements/postgresql-profiles', methods=['GET'])
 def get_entitlements_postgresql_profiles():
-    """Retourne les profils de droits PostgreSQL"""
+    """Return discovered PostgreSQL native roles without fictional defaults."""
     try:
-        config = load_config()
-        profiles = config.get('entitlements', {}).get('postgresql', {}).get('profiles', [])
-
-        if not profiles:
-            profiles = [
-                {"profileName": "readonly", "grants": "SELECT", "description": "Lecture seule"},
-                {"profileName": "readwrite", "grants": "SELECT, INSERT, UPDATE", "description": "Lecture et écriture"},
-                {"profileName": "admin", "grants": "SELECT, INSERT, UPDATE, DELETE, CREATE, DROP", "description": "Administrateur"}
-            ]
+        profiles = [
+            {
+                'profileName': role['association_value'],
+                'grants': role['native_name'],
+                'description': role['description'],
+            }
+            for manifest in get_manifests('postgresql')
+            for role in manifest['entitlements']
+        ]
 
         print_separator()
         print(f"ENTITLEMENTS PostgreSQL - {len(profiles)} profils")
@@ -329,17 +286,17 @@ def get_entitlements_postgresql_profiles():
 
 @app.route('/entitlements/mysql-profiles', methods=['GET'])
 def get_entitlements_mysql_profiles():
-    """Retourne les profils de droits MySQL"""
+    """Return discovered MySQL native roles without fictional defaults."""
     try:
-        config = load_config()
-        profiles = config.get('entitlements', {}).get('mysql', {}).get('profiles', [])
-
-        if not profiles:
-            profiles = [
-                {"profileName": "readonly", "grants": "SELECT", "description": "Lecture seule"},
-                {"profileName": "readwrite", "grants": "SELECT, INSERT, UPDATE", "description": "Lecture et écriture"},
-                {"profileName": "admin", "grants": "ALL PRIVILEGES", "description": "Administrateur"}
-            ]
+        profiles = [
+            {
+                'profileName': role['association_value'],
+                'grants': role['native_name'],
+                'description': role['description'],
+            }
+            for manifest in get_manifests('mysql')
+            for role in manifest['entitlements']
+        ]
 
         print_separator()
         print(f"ENTITLEMENTS MySQL - {len(profiles)} profils")
@@ -352,15 +309,46 @@ def get_entitlements_mysql_profiles():
 
 @app.route('/entitlements/mongodb-roles', methods=['GET'])
 def get_entitlements_mongodb_roles():
-    """Return roles discoverable on the target MongoDB database."""
+    """Return discovered MongoDB roles without static resilience fallbacks."""
     try:
-        roles = get_mongodb_roles(request.args.get('target'))
+        target_id = request.args.get('target')
+        targets = [
+            target for target in load_targets()
+            if target.get('type') == 'mongodb'
+            and (not target_id or target.get('id') == target_id)
+        ]
+        roles = [
+            {
+                'roleName': role['association_value'].split('@', 1)[0],
+                'database': target['connection']['database'],
+                'description': role['description'],
+            }
+            for target in targets
+            for role in synchronize(target)['entitlements']
+        ]
         print_separator()
         print(f"ENTITLEMENTS MongoDB - {len(roles)} rôles")
         print_separator()
         return jsonify(roles), 200
     except Exception as e:
         print(f"Erreur: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/entitlements/odoo-groups', methods=['GET'])
+def get_entitlements_odoo_groups():
+    """Return discovered Odoo groups."""
+    try:
+        groups = [
+            {
+                'groupName': role['association_value'],
+                'description': role['description'],
+            }
+            for manifest in get_manifests('odoo')
+            for role in manifest['entitlements']
+        ]
+        return jsonify(groups), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 

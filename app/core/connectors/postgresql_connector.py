@@ -1,6 +1,6 @@
 """PostgreSQL connector for user provisioning"""
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 import asyncpg
 
@@ -15,16 +15,7 @@ logger = logging.getLogger(__name__)
 # Mapping from MidPoint role names to built-in PostgreSQL roles (pg_read_all_data etc.)
 # These are PostgreSQL 14+ system roles — not user-created roles.
 # "superuser" maps to [] because the SUPERUSER attribute is set via ALTER ROLE, not GRANT.
-ROLE_TO_PG_ROLES: dict[str, list[str]] = {
-    "read": ["pg_read_all_data"],
-    "write": ["pg_write_all_data"],
-    "admin": ["pg_read_all_data", "pg_write_all_data"],
-    "readonly": ["pg_read_all_data"],
-    "readwrite": ["pg_read_all_data", "pg_write_all_data"],
-    "superuser": [],  # Will use SUPERUSER attribute instead
-    # Default mapping for MidPoint service role
-    "postgresql": ["pg_read_all_data", "pg_write_all_data"],
-}
+ROLE_TO_PG_ROLES: dict[str, list[str]] = {}
 
 
 class PostgreSQLConnector(ProvisioningConnector):
@@ -118,7 +109,7 @@ class PostgreSQLConnector(ProvisioningConnector):
         # Get attributes
         attrs = attributes or {}
         can_login = attrs.get("can_login", True)
-        is_superuser = "superuser" in (roles or [])
+        is_superuser = bool(attrs.get("superuser", False))
         database = attrs.get("database", "target_db")  # Default database
 
         # Get postgresqlGrants from attributes (comma-separated privileges like "SELECT, INSERT, UPDATE")
@@ -605,11 +596,7 @@ class PostgreSQLConnector(ProvisioningConnector):
         return list(pg_roles)
 
     # Mapping from profile names to PostgreSQL built-in roles
-    PROFILE_TO_PG_ROLES: dict[str, list[str]] = {
-        "readonly": ["pg_read_all_data"],
-        "readwrite": ["pg_read_all_data", "pg_write_all_data"],
-        "admin": ["pg_read_all_data", "pg_write_all_data"],
-    }
+    PROFILE_TO_PG_ROLES: ClassVar[dict[str, list[str]]] = {}
 
     def _resolve_profile_roles(self, grants: str | list[str]) -> list[str] | None:
         """Check if grants contain profile names and resolve to PG roles.
@@ -628,11 +615,7 @@ class PostgreSQLConnector(ProvisioningConnector):
         return list(all_roles) if all_roles else None
 
     # Mapping from profile names to SQL privileges
-    PROFILE_TO_PRIVILEGES: dict[str, list[str]] = {
-        "readonly": ["SELECT"],
-        "readwrite": ["SELECT", "INSERT", "UPDATE"],
-        "admin": ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP"],
-    }
+    PROFILE_TO_PRIVILEGES: ClassVar[dict[str, list[str]]] = {}
 
     def _parse_grants(self, grants: str | list[str]) -> list[str]:
         """Parse postgresqlGrants attribute into list of SQL privileges

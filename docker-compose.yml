@@ -139,14 +139,6 @@ services:
     env_file: .env.docker
     environment:
       TARGET_CATALOG_PATH: /app/config/targets.yaml
-      LDAP_HOST: ldap
-      LDAP_PORT: 10389
-      MONGODB_HOST: mongodb-target
-      MONGODB_PORT: 27017
-      MONGODB_USER: root
-      MONGODB_PASSWORD: mongodb_root_secret
-      MONGODB_DATABASE: target_db
-      MONGODB_AUTH_SOURCE: admin
     volumes:
       - ./config:/app/config:ro
     ports:
@@ -181,16 +173,14 @@ services:
     image: mysql:8.0
     container_name: gitivity-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: mysql_root_secret
-      MYSQL_DATABASE: target_db
-      MYSQL_USER: target_user
-      MYSQL_PASSWORD: target_secret
+      MYSQL_ROOT_PASSWORD: "${MYSQL_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:3306:3306"
     volumes:
       - mysql_target_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmysql_root_secret"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -204,15 +194,15 @@ services:
     image: postgres:15-alpine
     container_name: gitivity-postgresql
     environment:
-      POSTGRES_USER: target_user
-      POSTGRES_PASSWORD: target_secret
-      POSTGRES_DB: target_db
+      POSTGRES_USER: "${POSTGRESQL_USER}"
+      POSTGRES_PASSWORD: "${POSTGRESQL_PASSWORD}"
+      POSTGRES_DB: "${POSTGRESQL_DATABASE}"
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:${POSTGRESQL_TARGET_HOST_PORT:-5433}:5432"
     volumes:
       - postgresql_target_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U target_user -d target_db"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -227,15 +217,15 @@ services:
     image: mongo:7.0
     container_name: gitivity-mongodb
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: mongodb_root_secret
-      MONGO_INITDB_DATABASE: target_db
+      MONGO_INITDB_ROOT_USERNAME: "${MONGODB_USER}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGODB_PASSWORD}"
+      MONGO_INITDB_DATABASE: "${MONGODB_DATABASE}"
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:${MONGODB_TARGET_HOST_PORT:-27017}:27017"
     volumes:
       - mongodb_target_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--username", "root", "--password", "mongodb_root_secret", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "mongosh --quiet --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase ${MONGODB_AUTH_SOURCE:-admin} --eval \"db.adminCommand('ping').ok\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -264,13 +254,51 @@ services:
     profiles:
       - targets
 
+  # Create and initialize the configured Odoo database idempotently. This also
+  # handles pre-existing PostgreSQL volumes that only contain the postgres DB.
+  odoo-init:
+    image: odoo:17
+    container_name: gitivity-odoo-init
+    depends_on:
+      odoo-db:
+        condition: service_healthy
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo_secret
+      ODOO_DB: "${ODOO_DB}"
+      PGPASSWORD: odoo_secret
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        if ! psql -h "$$HOST" -U "$$USER" -d postgres -lqt \
+          | cut -d '|' -f 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//' \
+          | grep -Fxq "$$ODOO_DB"; then
+          createdb -h "$$HOST" -U "$$USER" "$$ODOO_DB"
+        fi
+        if ! psql -h "$$HOST" -U "$$USER" -d "$$ODOO_DB" -tAc \
+          "SELECT to_regclass('public.res_users') IS NOT NULL" | grep -qx t; then
+          odoo --db_host="$$HOST" --db_port=5432 \
+            --db_user="$$USER" --db_password="$$PASSWORD" \
+            -d "$$ODOO_DB" -i base --without-demo=all --stop-after-init
+        fi
+    volumes:
+      - odoo_data:/var/lib/odoo
+      - odoo_addons:/mnt/extra-addons
+    networks:
+      - gateway-network
+    restart: "no"
+    profiles:
+      - targets
+
   # Odoo ERP
   odoo:
     image: odoo:17
     container_name: gitivity-odoo
     depends_on:
-      odoo-db:
-        condition: service_healthy
+      odoo-init:
+        condition: service_completed_successfully
     environment:
       HOST: odoo-db
       USER: odoo

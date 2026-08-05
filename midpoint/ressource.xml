@@ -267,39 +267,6 @@
                 </outbound>
             </attribute>
 
-            <attribute>
-                <ref>ri:ldapGroups</ref>
-                <outbound>
-                    <strength>strong</strength>
-                    <expression>
-                        <script>
-                            <code>
-                            def ldapGroups = []
-                            def roleToLdapGroup = [
-                                'Developer': 'cn=Developers,ou=Groups,dc=openmicroscopy,dc=org',
-                                'Admin': 'cn=Admins,ou=Groups,dc=openmicroscopy,dc=org',
-                                'Manager': 'cn=Managers,ou=Groups,dc=openmicroscopy,dc=org',
-                                'User': 'cn=Users,ou=Groups,dc=openmicroscopy,dc=org'
-                            ]
-
-                            focus?.assignment?.each { assignment ->
-                                if (assignment.targetRef?.type?.localPart == 'RoleType') {
-                                    def role = midpoint.resolveReferenceIfExists(assignment.targetRef)
-                                    if (role != null) {
-                                        def roleName = role.name?.orig
-                                        if (roleToLdapGroup.containsKey(roleName)) {
-                                            ldapGroups.add(roleToLdapGroup[roleName])
-                                        }
-                                    }
-                                }
-                            }
-                            return ldapGroups
-                            </code>
-                        </script>
-                    </expression>
-                </outbound>
-            </attribute>
-
             <association>
                 <ref>ri:ldapGroup</ref>
                 <displayName>Groupe LDAP</displayName>
@@ -316,7 +283,7 @@
                 <kind>entitlement</kind>
                 <intent>postgresqlProfile</intent>
                 <direction>subjectToObject</direction>
-                <associationAttribute>ri:postgresqlGrants</associationAttribute>
+                <associationAttribute>ri:postgresqlRole</associationAttribute>
                 <valueAttribute>icfs:uid</valueAttribute>
             </association>
 
@@ -326,7 +293,7 @@
                 <kind>entitlement</kind>
                 <intent>mysqlProfile</intent>
                 <direction>subjectToObject</direction>
-                <associationAttribute>ri:mysqlGrants</associationAttribute>
+                <associationAttribute>ri:mysqlRole</associationAttribute>
                 <valueAttribute>icfs:uid</valueAttribute>
             </association>
 
@@ -337,6 +304,16 @@
                 <intent>mongodbRole</intent>
                 <direction>subjectToObject</direction>
                 <associationAttribute>ri:mongodbRoles</associationAttribute>
+                <valueAttribute>icfs:uid</valueAttribute>
+            </association>
+
+            <association>
+                <ref>ri:odooGroup</ref>
+                <displayName>Groupe Odoo</displayName>
+                <kind>entitlement</kind>
+                <intent>odooGroup</intent>
+                <direction>subjectToObject</direction>
+                <associationAttribute>ri:odooGroups</associationAttribute>
                 <valueAttribute>icfs:uid</valueAttribute>
             </association>
 
@@ -446,6 +423,25 @@
             <attribute>
                 <ref>ri:database</ref>
                 <displayName>Base MongoDB</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:description</ref>
+                <displayName>Description</displayName>
+            </attribute>
+        </objectType>
+
+        <!-- Groupes Odoo découverts dynamiquement -->
+        <objectType>
+            <kind>entitlement</kind>
+            <intent>odooGroup</intent>
+            <objectClass>ri:CustomOdooGroupObjectClass</objectClass>
+            <attribute>
+                <ref>icfs:name</ref>
+                <displayName>Nom du groupe</displayName>
+            </attribute>
+            <attribute>
+                <ref>ri:groupName</ref>
+                <displayName>Nom du groupe</displayName>
             </attribute>
             <attribute>
                 <ref>ri:description</ref>

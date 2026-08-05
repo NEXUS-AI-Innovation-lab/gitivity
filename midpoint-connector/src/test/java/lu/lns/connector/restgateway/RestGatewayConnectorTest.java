@@ -70,8 +70,8 @@ public class RestGatewayConnectorTest {
 
         assertNotNull(schema);
         Set<ObjectClassInfo> objectClasses = schema.getObjectClassInfo();
-        // 4 types de base + 4 entitlements = 8
-        assertEquals(8, objectClasses.size());
+        // 4 types de base + 5 entitlements = 9
+        assertEquals(9, objectClasses.size());
 
         // Check User (Account) class
         ObjectClassInfo accountClass = schema.findObjectClassInfo(ObjectClass.ACCOUNT_NAME);
@@ -92,6 +92,9 @@ public class RestGatewayConnectorTest {
         AttributeInfo mongodbRolesAttr = findAttribute(accountClass, "mongodbRoles");
         assertNotNull(mongodbRolesAttr);
         assertTrue(mongodbRolesAttr.isMultiValued());
+        assertNotNull(findAttribute(accountClass, "mysqlRole"));
+        assertNotNull(findAttribute(accountClass, "postgresqlRole"));
+        assertTrue(findAttribute(accountClass, "odooGroups").isMultiValued());
 
         // Check Role class
         ObjectClassInfo roleClass = schema.findObjectClassInfo("Role");
@@ -134,6 +137,10 @@ public class RestGatewayConnectorTest {
         assertNotNull(mongoRoleClass);
         assertNotNull(findAttribute(mongoRoleClass, "roleName"));
         assertNotNull(findAttribute(mongoRoleClass, "database"));
+
+        ObjectClassInfo odooGroupClass = schema.findObjectClassInfo("OdooGroup");
+        assertNotNull(odooGroupClass);
+        assertNotNull(findAttribute(odooGroupClass, "groupName"));
 
         connector.dispose();
     }

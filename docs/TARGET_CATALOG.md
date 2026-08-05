@@ -18,12 +18,10 @@ Chaque entrée décrit :
   cible même sans alias de rôle ;
 - `routing.delete_mode` : `delete`, ou `update` pour un nettoyage sans
   suppression du compte (cas LDAP) ;
-- `entitlements` : configuration optionnelle de découverte des droits.
+- `entitlements` : fournisseur de découverte, identifiant d'association et
+  nom de l'entitlement natif de base ;
 - `deployment.environment` : variables ajoutées automatiquement à
-  `.env.docker` par Ansible pour une instance supplémentaire ;
-- `deployment.midpoint_database` : nom utilisé dans les rôles MongoDB générés.
-- `deployment.midpoint_roles` : entitlements propres à une instance, utilisés
-  pour générer ses rôles midPoint (notamment les groupes d'un LDAP additionnel).
+  `.env.docker` par Ansible pour toutes les instances ;
 - `connection.group_object_classes` : classes LDAP utilisées pour découvrir
   les groupes de cette cible, par exemple `groupOfNames` ou `posixGroup`.
 
@@ -51,7 +49,12 @@ Exemple : une seconde base PostgreSQL dédiée au reporting.
        database: ${REPORTING_DB_NAME:-reporting}
        connect_timeout: 10
      routing:
-       entitlement_attributes: [reportingRole]
+       entitlement_attributes: [postgresqlRole]
+     entitlements:
+       provider: postgresql_roles
+       identifier: "{target}.{name}"
+       association_ref: postgresqlProfile
+       base_name: gateway-base
      deployment:
        environment:
          REPORTING_DB_HOST: reporting-db.internal
@@ -61,10 +64,11 @@ Exemple : une seconde base PostgreSQL dédiée au reporting.
          REPORTING_DB_NAME: reporting
    ```
 
-2. Relancer le playbook Ansible habituel. Il valide la cible, ajoute les
-   variables à `.env.docker`, génère les rôles MidPoint standards avec des OID
-   déterministes, puis les importe par upsert. Aucun XML ne doit être créé
-   manuellement.
+2. Relancer le playbook Ansible habituel. Il valide la cible, génère
+   `.env.docker`, crée idempotemment l'entitlement natif `gateway-base`, découvre
+   les entitlements réels, génère un rôle MidPoint par entitlement avec un OID
+   déterministe, puis les importe par upsert. Aucun rôle/XML ne doit être déclaré
+   manuellement dans le catalogue.
 
 3. Vérifier que la cible apparaît et répond :
 
@@ -105,16 +109,17 @@ Le routage est indépendant du nombre de rôles natifs. MidPoint peut envoyer :
 }
 ```
 
-Le rôle MidPoint combiné existant peut donc continuer à attribuer simultanément
-`readWrite` et `dbAdmin` sans configuration spéciale dans le consumer.
+Les rôles MidPoint sont générés individuellement depuis ces rôles natifs. Le
+consumer retire uniquement le préfixe d'instance avant l'appel au connecteur.
 
 ## Entitlements
 
-Gateway HTTP lit le même catalogue. L'endpoint MongoDB historique reste
-compatible et accepte un identifiant de cible :
+Gateway HTTP lit le même catalogue et échoue fermé si une cible n'est pas
+joignable : aucune liste fictive de secours n'est produite. Le manifeste normalisé
+d'une cible est disponible sur :
 
 ```bash
-curl "http://10.10.0.1:5100/entitlements/mongodb-roles?target=mongodb"
+curl "http://10.10.0.1:5100/entitlements/manifest?target=mongodb"
 ```
 
 La liste non sensible des cibles est disponible sur :
@@ -124,6 +129,19 @@ curl http://10.10.0.1:5100/targets
 ```
 
 Les secrets ne sont jamais retournés par l'API des connecteurs.
+
+## Disparition d'un entitlement
+
+Après un upsert réussi des rôles, Ansible transmet les manifestes complets à
+l'API. Un entitlement précédemment inventorié mais absent crée une demande
+durable en PostgreSQL et avertit la chaîne d'approbation actuelle. La demande
+n'expire pas ; le lien signé est à usage unique, expire et peut être renouvelé.
+Après approbation de tous les niveaux, Gateway vérifie à nouveau la cible,
+désassigne le rôle de tous les objets MidPoint qui le référencent, puis supprime
+uniquement le rôle MidPoint. L'entitlement natif n'est jamais supprimé.
+
+Les anciens XML statiques ont été retirés. Au premier déploiement, leurs OID sont
+enregistrés dans le même workflow : ils ne sont donc pas supprimés sans décision.
 
 Pour le moment, `deployment.environment` suit le mécanisme existant et peut
 contenir les valeurs directement. L'adoption d'Ansible Vault pourra se faire

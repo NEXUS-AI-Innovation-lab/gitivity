@@ -20,6 +20,25 @@ targets:
       connect_timeout: ${MYSQL_CONNECT_TIMEOUT:-10}
     routing:
       entitlement_attributes: [mysqlProfile, mysqlGrants, mysqlRole]
+    entitlements:
+      provider: mysql_roles
+      identifier: "{target}.{name}"
+      association_ref: mysqlProfile
+      base_name: gateway-base
+    provisioning:
+      managed_roles:
+        - name: admin
+          privileges: [ALL]
+        - name: readonly
+          privileges: [SELECT]
+    deployment:
+      environment:
+        MYSQL_HOST: mysql-target
+        MYSQL_PORT: 3306
+        MYSQL_USER: root
+        MYSQL_PASSWORD: mysql_root_secret
+        MYSQL_DATABASE: target_db
+        MYSQL_CONNECT_TIMEOUT: 10
 
   - id: postgresql
     type: postgresql
@@ -35,6 +54,25 @@ targets:
       connect_timeout: ${POSTGRESQL_CONNECT_TIMEOUT:-10}
     routing:
       entitlement_attributes: [postgresqlProfile, postgresqlGrants, postgresqlRole]
+    entitlements:
+      provider: postgresql_roles
+      identifier: "{target}.{name}"
+      association_ref: postgresqlProfile
+      base_name: gateway-base
+    provisioning:
+      managed_roles:
+        - name: admin
+          privileges: [ALL]
+        - name: readonly
+          privileges: [SELECT]
+    deployment:
+      environment:
+        POSTGRESQL_HOST: postgresql-target
+        POSTGRESQL_PORT: 5432
+        POSTGRESQL_USER: target_user
+        POSTGRESQL_PASSWORD: target_secret
+        POSTGRESQL_DATABASE: target_db
+        POSTGRESQL_CONNECT_TIMEOUT: 10
 
   - id: mongodb
     type: mongodb
@@ -53,8 +91,18 @@ targets:
       entitlement_attributes: [mongodbRoles, mongodbRole]
     entitlements:
       provider: mongodb_roles
-      identifier: "{role}@{database}"
-      fallback: [read, readWrite, dbAdmin, dbOwner]
+      identifier: "{target}.{role}@{database}"
+      association_ref: mongodbRole
+      base_name: gateway-base
+    deployment:
+      environment:
+        MONGODB_HOST: mongodb-target
+        MONGODB_PORT: 27017
+        MONGODB_USER: root
+        MONGODB_PASSWORD: mongodb_root_secret
+        MONGODB_DATABASE: target_db
+        MONGODB_AUTH_SOURCE: admin
+        MONGODB_CONNECT_TIMEOUT: 10
 
   - id: ldap
     type: ldap
@@ -77,10 +125,26 @@ targets:
       entitlement_attributes: [ldapGroups, ldapGroup]
       delete_mode: update
     provisioning:
-      seed_groups: [Admins, Developers, Managers, Users]
       group_object_class: groupOfNames
       group_member_attribute: member
       group_initial_member: ${LDAP_BIND_DN:-uid=admin,ou=system}
+    entitlements:
+      provider: ldap_groups
+      identifier: "{target}.{name}"
+      association_ref: ldapGroup
+      base_name: gateway-base
+    deployment:
+      environment:
+        LDAP_HOST: ldap
+        LDAP_PORT: 10389
+        LDAP_USE_SSL: false
+        LDAP_BIND_DN: uid=admin,ou=system
+        LDAP_BIND_PASSWORD: secret
+        LDAP_BASE_DN: dc=openmicroscopy,dc=org
+        LDAP_USERS_BASE_DN: ou=Users,dc=openmicroscopy,dc=org
+        LDAP_GROUPS_BASE_DN: ou=Groups,dc=openmicroscopy,dc=org
+        LDAP_USER_OBJECT_CLASS: inetOrgPerson
+        LDAP_CONNECT_TIMEOUT: 10
   - id: odoo
     type: odoo
     display_name: Odoo
@@ -94,6 +158,18 @@ targets:
       timeout: ${ODOO_TIMEOUT:-30}
     routing:
       entitlement_attributes: [odooGroups, odooGroup]
+    entitlements:
+      provider: odoo_groups
+      identifier: "{target}.{name}"
+      association_ref: odooGroup
+      base_name: gateway-base
+    deployment:
+      environment:
+        ODOO_URL: http://odoo:8069
+        ODOO_DB: odoo
+        ODOO_USERNAME: admin
+        ODOO_PASSWORD: admin
+        ODOO_TIMEOUT: 30
 
   - id: ldap-test
     type: ldap
@@ -115,6 +191,15 @@ targets:
     routing:
       entitlement_attributes: [ldapGroups, ldapGroup]
       delete_mode: update
+    provisioning:
+      group_object_class: groupOfNames
+      group_member_attribute: member
+      group_initial_member: ${LDAP_TEST_BIND_DN:-cn=admin,dc=lissi,dc=fr}
+    entitlements:
+      provider: ldap_groups
+      identifier: "{target}.{name}"
+      association_ref: ldapGroup
+      base_name: gateway-base
     deployment:
       environment:
         LDAP_TEST_HOST: 10.10.0.1
@@ -127,18 +212,3 @@ targets:
         LDAP_TEST_GROUPS_BASE_DN: ou=groups,ou=olga,dc=lissi,dc=fr
         LDAP_TEST_USER_OBJECT_CLASS: inetOrgPerson
         LDAP_TEST_CONNECT_TIMEOUT: 10
-      midpoint_roles:
-        - { key: admins, label: Admins, association_ref: ldapGroup, association_value: admins }
-        - { key: developpeurs, label: Developpeurs, association_ref: ldapGroup, association_value: developpeurs }
-        - { key: it-support, label: IT Support, association_ref: ldapGroup, association_value: it-support }
-        - { key: assistants, label: Assistants, association_ref: ldapGroup, association_value: assistants }
-        - { key: rh, label: RH, association_ref: ldapGroup, association_value: rh }
-        - { key: comptabilite, label: Comptabilite, association_ref: ldapGroup, association_value: comptabilite }
-        - { key: marketing, label: Marketing, association_ref: ldapGroup, association_value: marketing }
-        - { key: ventes, label: Ventes, association_ref: ldapGroup, association_value: ventes }
-        - { key: direction, label: Direction, association_ref: ldapGroup, association_value: direction }
-        - { key: stagiaires, label: Stagiaires, association_ref: ldapGroup, association_value: stagiaires }
-        - { key: soignant, label: SOIGNANT, association_ref: ldapGroup, association_value: SOIGNANT }
-        - { key: administratif, label: ADMINISTRATIF, association_ref: ldapGroup, association_value: ADMINISTRATIF }
-        - { key: externe, label: EXTERNE, association_ref: ldapGroup, association_value: EXTERNE }
-        - { key: medical, label: MEDICAL, association_ref: ldapGroup, association_value: MEDICAL }

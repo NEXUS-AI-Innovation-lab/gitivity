@@ -1,9 +1,24 @@
+import re
 import time
+from pathlib import Path
 
 import pytest
 
 from app.config.target_catalog import TargetCatalog
 from app.utils.enums import TargetService
+
+
+def test_catalog_associations_exist_in_midpoint_resource_schema():
+    root = Path(__file__).parents[2]
+    catalog = TargetCatalog(root / "config" / "targets.yaml")
+    resource = (root / "midpoint" / "ressource.xml").read_text(encoding="utf-8")
+    association_refs = set(
+        re.findall(r"<association>\s*<ref>ri:([^<]+)</ref>", resource)
+    )
+
+    for target in catalog.targets():
+        if target.entitlements:
+            assert target.entitlements.association_ref in association_refs
 
 
 def write_catalog(path, *, host="${TEST_TARGET_HOST:-localhost}", second=""):
@@ -55,7 +70,6 @@ def test_catalog_parses_deployment_metadata(tmp_path):
       environment:
         REPORTING_DB_HOST: reporting-db.internal
         REPORTING_DB_PORT: 5432
-      midpoint_database: reporting
 """,
         encoding="utf-8",
     )
@@ -66,7 +80,6 @@ def test_catalog_parses_deployment_metadata(tmp_path):
         "REPORTING_DB_HOST": "reporting-db.internal",
         "REPORTING_DB_PORT": 5432,
     }
-    assert target.deployment.midpoint_database == "reporting"
 
 
 def test_catalog_hot_reloads_after_file_change(tmp_path):

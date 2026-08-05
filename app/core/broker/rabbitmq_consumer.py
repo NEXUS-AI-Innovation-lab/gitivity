@@ -274,6 +274,70 @@ class RabbitMQConsumer(BrokerConsumer):
         ]
         return list(dict.fromkeys([*role_targets, *attribute_targets]))
 
+    @staticmethod
+    def _extract_polystring(value: Any) -> str:
+        if isinstance(value, dict):
+            return value.get("orig", "") or value.get("norm", "") or ""
+        return value or ""
+
+    async def _enrich_delete_from_midpoint(
+        self,
+        request_id: str,
+        username: str,
+        email: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        roles: list[str],
+    ) -> tuple[str, str | None, str | None, str | None, list[str]]:
+        """Fill DELETE payload gaps from the current MidPoint user assignments."""
+        from app.services.midpoint_client import midpoint_client
+
+        mp_user = await midpoint_client.get_user(request_id)
+        if not mp_user:
+            return username, email, first_name, last_name, roles
+
+        if not username:
+            username = self._extract_polystring(mp_user.get("name"))
+
+        email_value = self._extract_polystring(mp_user.get("emailAddress"))
+        email = email or email_value or None
+
+        given_name = self._extract_polystring(mp_user.get("givenName"))
+        family_name = self._extract_polystring(mp_user.get("familyName"))
+        first_name = first_name or given_name or None
+        last_name = last_name or family_name or None
+
+        assignments = mp_user.get("assignment", [])
+        if not isinstance(assignments, list):
+            assignments = [assignments]
+
+        enriched_roles = list(roles)
+        for assignment in assignments:
+            target_ref = assignment.get("targetRef", {})
+            ref_oid = target_ref.get("oid")
+            ref_type = target_ref.get("type", "")
+            if not ref_oid or "RoleType" not in ref_type:
+                continue
+
+            role_name = self._extract_polystring(target_ref.get("targetName"))
+            if not role_name:
+                try:
+                    role = await midpoint_client.get_role(ref_oid)
+                except Exception:
+                    role = None
+                if role:
+                    role_name = self._extract_polystring(role.get("name"))
+
+            if role_name and role_name not in enriched_roles:
+                enriched_roles.append(role_name)
+
+        logger.info(
+            "DELETE enriched from MidPoint: username=%s, roles=%s",
+            username,
+            enriched_roles,
+        )
+        return username, email, first_name, last_name, enriched_roles
+
     async def _parse_message(self, data: dict[str, Any]) -> list[MidPointMessage]:
         """Parse raw message data into MidPointMessage(s)
 
@@ -371,54 +435,23 @@ class RabbitMQConsumer(BrokerConsumer):
         username = attributes.get("username") or attributes.get("__NAME__", "")
 
         # === DELETE enrichment: fetch user info from MidPoint/Redis ===
-        if operation_type == OperationType.DELETE_USER and not username:
-            logger.info(f"DELETE without attributes - enriching from MidPoint (uid={request_id})")
-            # Try MidPoint API first
+        if operation_type == OperationType.DELETE_USER:
             try:
-                from app.services.midpoint_client import midpoint_client
-                mp_user = await midpoint_client.get_user(request_id)
-                if mp_user:
-                    # Extract username
-                    name_field = mp_user.get("name", {})
-                    if isinstance(name_field, dict):
-                        username = name_field.get("orig", "")
-                    elif isinstance(name_field, str):
-                        username = name_field
-
-                    # Extract email
-                    email_field = mp_user.get("emailAddress")
-                    if isinstance(email_field, dict):
-                        email = email_field.get("orig", email)
-                    elif isinstance(email_field, str):
-                        email = email_field
-
-                    # Extract names
-                    gn = mp_user.get("givenName", {})
-                    first_name = gn.get("orig", "") if isinstance(gn, dict) else (gn or "")
-                    fn = mp_user.get("familyName", {})
-                    last_name = fn.get("orig", "") if isinstance(fn, dict) else (fn or "")
-
-                    # Determine services from role assignments
-                    assignments = mp_user.get("assignment", [])
-                    if not isinstance(assignments, list):
-                        assignments = [assignments]
-                    for assignment in assignments:
-                        target_ref = assignment.get("targetRef", {})
-                        ref_oid = target_ref.get("oid")
-                        ref_type = target_ref.get("type", "")
-                        if ref_oid and "RoleType" in ref_type:
-                            try:
-                                role = await midpoint_client.get_role(ref_oid)
-                                if role:
-                                    role_name = role.get("name", "")
-                                    if isinstance(role_name, dict):
-                                        role_name = role_name.get("orig", "")
-                                    if role_name:
-                                        roles.append(role_name)
-                            except Exception:
-                                pass
-
-                    logger.info(f"DELETE enriched from MidPoint: username={username}, roles={roles}")
+                logger.info(
+                    "DELETE enrichment from MidPoint (uid=%s, username=%s)",
+                    request_id,
+                    username or "<missing>",
+                )
+                username, email, first_name, last_name, roles = (
+                    await self._enrich_delete_from_midpoint(
+                        request_id=request_id,
+                        username=username,
+                        email=email,
+                        first_name=first_name,
+                        last_name=last_name,
+                        roles=roles,
+                    )
+                )
             except Exception as e:
                 logger.warning(f"Failed to enrich DELETE from MidPoint: {e}")
 
@@ -667,6 +700,19 @@ class RabbitMQConsumer(BrokerConsumer):
                 continue
             target_services_processed.add(target_id)
             target = self._target(target_id)
+            target_user_data = user_data.model_copy(deep=True)
+            prefix = f"{target.id}."
+            for attribute_name in target.routing.entitlement_attributes:
+                value = target_user_data.attributes.get(attribute_name)
+                if isinstance(value, str) and value.startswith(prefix):
+                    target_user_data.attributes[attribute_name] = value[len(prefix):]
+                elif isinstance(value, list):
+                    target_user_data.attributes[attribute_name] = [
+                        item[len(prefix):]
+                        if isinstance(item, str) and item.startswith(prefix)
+                        else item
+                        for item in value
+                    ]
 
             # Add timestamp to make request_id unique per operation
             timestamp_ms = int(time.time() * 1000)
@@ -675,7 +721,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 operation_type=operation_type,
                 target_service=target.family,
                 target_id=target.id,
-                user_data=user_data,
+                user_data=target_user_data,
                 metadata={
                     "source": "midpoint",
                     "entityType": data.get("entityType", "User"),

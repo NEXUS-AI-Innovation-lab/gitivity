@@ -12,18 +12,6 @@ from app.utils.exceptions import ConnectorConnectionError, ProvisioningError
 
 logger = logging.getLogger(__name__)
 
-# Mapping from MidPoint role names to MySQL GRANT privileges.
-# These become GRANT <privilege> ON <database>.* TO <user>@<host>.
-ROLE_TO_PRIVILEGES: dict[str, list[str]] = {
-    "read": ["SELECT"],
-    "write": ["SELECT", "INSERT", "UPDATE", "DELETE"],
-    "admin": ["ALL PRIVILEGES"],
-    "readonly": ["SELECT"],
-    "readwrite": ["SELECT", "INSERT", "UPDATE", "DELETE"],
-    "dba": ["ALL PRIVILEGES WITH GRANT OPTION"],
-}
-
-
 class MySQLConnector(ProvisioningConnector):
     """Connector for MySQL user provisioning"""
 
@@ -158,19 +146,17 @@ class MySQLConnector(ProvisioningConnector):
                             logger.debug(f"Granted {privilege} to {username}@{host}")
                     # Priority 2: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
                     elif mysql_role:
-                        privileges = self._roles_to_privileges([mysql_role])
-                        logger.info(f"Using mysqlRole attribute '{mysql_role}': {privileges}")
-                        for privilege in privileges:
-                            grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
-                            await cursor.execute(grant_sql, (username, host))
-                            logger.debug(f"Granted {privilege} to {username}@{host}")
-                    # Priority 3: Use role-based privileges from roles array
-                    elif roles:
-                        privileges = self._roles_to_privileges(roles)
-                        for privilege in privileges:
-                            grant_sql = f"GRANT {privilege} ON {database}.* TO %s@%s"
-                            await cursor.execute(grant_sql, (username, host))
-                            logger.debug(f"Granted {privilege} to {username}@{host}")
+                        resolved_role = await self._resolve_native_mysql_role(
+                            cursor, mysql_role
+                        )
+                        role_name = resolved_role.replace("`", "``")
+                        await cursor.execute(
+                            f"GRANT `{role_name}` TO %s@%s", (username, host)
+                        )
+                        await cursor.execute(
+                            f"SET DEFAULT ROLE `{role_name}` TO %s@%s",
+                            (username, host),
+                        )
 
                     await cursor.execute("FLUSH PRIVILEGES")
 
@@ -273,6 +259,15 @@ class MySQLConnector(ProvisioningConnector):
                             await cursor.execute(revoke_sql, (username, host))
                         except aiomysql.Error:
                             pass  # User might not have any privileges yet
+                        await cursor.execute(
+                            "SELECT FROM_USER, FROM_HOST FROM mysql.role_edges "
+                            "WHERE TO_USER=%s AND TO_HOST=%s",
+                            (username, host),
+                        )
+                        for role_user, role_host in await cursor.fetchall():
+                            role_account = self._quote_account(role_user, role_host)
+                            user_account = self._quote_account(username, host)
+                            await cursor.execute(f"REVOKE {role_account} FROM {user_account}")
 
                         # Priority 1: Use mysqlGrants if provided
                         if mysql_grants:
@@ -280,11 +275,18 @@ class MySQLConnector(ProvisioningConnector):
                             logger.info(f"Updating with mysqlGrants: {privileges}")
                         # Priority 2: Use mysqlRole attribute (e.g., "readonly", "readwrite", "admin")
                         elif mysql_role:
-                            privileges = self._roles_to_privileges([mysql_role])
-                            logger.info(f"Updating with mysqlRole '{mysql_role}': {privileges}")
-                        # Priority 3: Use role-based privileges from roles array
-                        elif roles is not None:
-                            privileges = self._roles_to_privileges(roles)
+                            resolved_role = await self._resolve_native_mysql_role(
+                                cursor, mysql_role
+                            )
+                            role_name = resolved_role.replace("`", "``")
+                            await cursor.execute(
+                                f"GRANT `{role_name}` TO %s@%s", (username, host)
+                            )
+                            await cursor.execute(
+                                f"SET DEFAULT ROLE `{role_name}` TO %s@%s",
+                                (username, host),
+                            )
+                            privileges = []
                         else:
                             privileges = []
 
@@ -372,16 +374,58 @@ class MySQLConnector(ProvisioningConnector):
                 is_retriable=True,
             )
 
-    def _roles_to_privileges(self, roles: list[str]) -> list[str]:
-        """Convert role names to MySQL privileges"""
-        privileges: set[str] = set()
-        for role in roles:
-            role_lower = role.lower()
-            if role_lower in ROLE_TO_PRIVILEGES:
-                privileges.update(ROLE_TO_PRIVILEGES[role_lower])
-            else:
-                privileges.add(role.upper())
-        return list(privileges)
+    @staticmethod
+    def _quote_account(username: str, host: str) -> str:
+        user = username.replace("`", "``")
+        account_host = host.replace("`", "``")
+        return f"`{user}`@`{account_host}`"
+
+    @staticmethod
+    def _mysql_role_candidates(mysql_role: Any) -> list[str]:
+        """Normalize mysqlRole into candidate native MySQL role names."""
+        if mysql_role is None:
+            return []
+
+        raw_values = mysql_role if isinstance(mysql_role, list) else [mysql_role]
+        candidates: list[str] = []
+
+        for raw_value in raw_values:
+            if not isinstance(raw_value, str):
+                continue
+
+            normalized = raw_value.strip()
+            if not normalized or normalized.lower() == "mysql":
+                continue
+
+            candidates.append(normalized)
+            if "." in normalized:
+                suffix = normalized.rsplit(".", 1)[-1].strip()
+                if suffix and suffix.lower() != "mysql":
+                    candidates.append(suffix)
+
+        return list(dict.fromkeys(candidates))
+
+    async def _resolve_native_mysql_role(
+        self,
+        cursor: aiomysql.Cursor,
+        mysql_role: Any,
+    ) -> str:
+        """Pick the first existing native MySQL role from mysqlRole input."""
+        for candidate in self._mysql_role_candidates(mysql_role):
+            await cursor.execute(
+                "SELECT 1 FROM mysql.user WHERE User=%s "
+                "AND account_locked='Y' AND authentication_string=''",
+                (candidate,),
+            )
+            if await cursor.fetchone():
+                return candidate
+
+        raise ProvisioningError(
+            operation_id="",
+            target_service=TargetService.MYSQL,
+            error_message=f"Native MySQL role does not exist: {mysql_role}",
+            is_retriable=False,
+        )
 
     def _parse_grants(self, grants: str | list[str]) -> list[str]:
         """Parse mysqlGrants attribute into list of SQL privileges
@@ -394,20 +438,7 @@ class MySQLConnector(ProvisioningConnector):
             List of uppercase privilege names
         """
         if isinstance(grants, list):
-            # Check if list items are profile names
-            resolved = []
-            for item in grants:
-                item_lower = item.strip().lower()
-                if item_lower in ROLE_TO_PRIVILEGES:
-                    resolved.extend(ROLE_TO_PRIVILEGES[item_lower])
-                else:
-                    resolved.append(item.strip().upper())
-            return list(set(resolved)) if resolved else []
-
-        # Single string: check if it's a profile name
-        grants_lower = grants.strip().lower()
-        if grants_lower in ROLE_TO_PRIVILEGES:
-            return ROLE_TO_PRIVILEGES[grants_lower]
+            return list(dict.fromkeys(item.strip().upper() for item in grants if item.strip()))
 
         # Split by comma and clean up
         privileges: list[str] = []

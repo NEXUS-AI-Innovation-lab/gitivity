@@ -1,9 +1,11 @@
 """Unit tests for provisioning connectors"""
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.core.connectors.factory import ConnectorFactory, get_connector
-from app.core.connectors.mysql_connector import MySQLConnector, ROLE_TO_PRIVILEGES
-from app.core.connectors.postgresql_connector import PostgreSQLConnector, ROLE_TO_PG_ROLES
+from app.core.connectors.mysql_connector import MySQLConnector
+from app.core.connectors.postgresql_connector import PostgreSQLConnector
 from app.core.connectors.mongodb_connector import MongoDBConnector
 from app.core.connectors.ldap_connector import LDAPConnector
 from app.config.target_catalog import TargetDefinition
@@ -102,35 +104,27 @@ class TestMySQLConnector:
         """Test service name property"""
         assert mysql_connector.service_name == TargetService.MYSQL
 
-    def test_roles_to_privileges_read(self, mysql_connector):
-        """Test role mapping for read role"""
-        privileges = mysql_connector._roles_to_privileges(["read"])
-        assert "SELECT" in privileges
+    def test_native_account_quoting(self, mysql_connector):
+        assert mysql_connector._quote_account("gateway-base", "%") == "`gateway-base`@`%`"
 
-    def test_roles_to_privileges_write(self, mysql_connector):
-        """Test role mapping for write role"""
-        privileges = mysql_connector._roles_to_privileges(["write"])
-        assert "SELECT" in privileges
-        assert "INSERT" in privileges
-        assert "UPDATE" in privileges
-        assert "DELETE" in privileges
+    def test_mysql_role_candidates_normalize_list_and_prefixes(self, mysql_connector):
+        assert mysql_connector._mysql_role_candidates(
+            ["mysql", "mysql.admin", " admin ", "mysql.admin"]
+        ) == ["mysql.admin", "admin"]
 
-    def test_roles_to_privileges_admin(self, mysql_connector):
-        """Test role mapping for admin role"""
-        privileges = mysql_connector._roles_to_privileges(["admin"])
-        assert "ALL PRIVILEGES" in privileges
+    @pytest.mark.asyncio
+    async def test_resolve_native_mysql_role_accepts_list_payload(self, mysql_connector):
+        cursor = AsyncMock()
+        cursor.fetchone.side_effect = [None, (1,)]
 
-    def test_roles_to_privileges_custom(self, mysql_connector):
-        """Test that unknown roles are passed as-is"""
-        privileges = mysql_connector._roles_to_privileges(["EXECUTE"])
-        assert "EXECUTE" in privileges
+        resolved = await mysql_connector._resolve_native_mysql_role(
+            cursor,
+            ["mysql", "mysql.admin"],
+        )
 
-    def test_roles_to_privileges_multiple(self, mysql_connector):
-        """Test mapping multiple roles"""
-        privileges = mysql_connector._roles_to_privileges(["read", "write"])
-        # Should deduplicate privileges
-        assert "SELECT" in privileges
-        assert "INSERT" in privileges
+        assert resolved == "admin"
+        assert cursor.execute.await_args_list[0].args[1] == ("mysql.admin",)
+        assert cursor.execute.await_args_list[1].args[1] == ("admin",)
 
 
 class TestPostgreSQLConnector:
@@ -145,41 +139,8 @@ class TestPostgreSQLConnector:
         """Test service name property"""
         assert pg_connector.service_name == TargetService.POSTGRESQL
 
-    def test_roles_to_pg_roles_read(self, pg_connector):
-        """Test role mapping for read role"""
-        pg_roles = pg_connector._roles_to_pg_roles(["read"])
-        assert "pg_read_all_data" in pg_roles
-
-    def test_roles_to_pg_roles_write(self, pg_connector):
-        """Test role mapping for write role"""
-        pg_roles = pg_connector._roles_to_pg_roles(["write"])
-        assert "pg_write_all_data" in pg_roles
-
-    def test_roles_to_pg_roles_superuser_excluded(self, pg_connector):
-        """Test that superuser role is not in pg_roles (handled as attribute)"""
-        pg_roles = pg_connector._roles_to_pg_roles(["superuser"])
-        assert len(pg_roles) == 0  # superuser is handled separately
-
-    def test_roles_to_pg_roles_custom(self, pg_connector):
-        """Test that unknown roles are passed as-is"""
-        pg_roles = pg_connector._roles_to_pg_roles(["custom_role"])
-        assert "custom_role" in pg_roles
-
-
-class TestRoleMappings:
-    """Test role mapping constants"""
-
-    def test_mysql_role_mappings_exist(self):
-        """Test MySQL role mappings are defined"""
-        assert "read" in ROLE_TO_PRIVILEGES
-        assert "write" in ROLE_TO_PRIVILEGES
-        assert "admin" in ROLE_TO_PRIVILEGES
-
-    def test_postgresql_role_mappings_exist(self):
-        """Test PostgreSQL role mappings are defined"""
-        assert "read" in ROLE_TO_PG_ROLES
-        assert "write" in ROLE_TO_PG_ROLES
-        assert "admin" in ROLE_TO_PG_ROLES
+    def test_native_role_is_not_remapped(self, pg_connector):
+        assert pg_connector._roles_to_pg_roles(["accounting"]) == ["accounting"]
 
 
 class TestMongoDBConnector:
@@ -203,7 +164,7 @@ class TestMongoDBConnector:
 
     def test_service_marker_is_not_granted(self, mongodb_connector):
         roles = mongodb_connector._normalize_roles(["mongodb"], {}, "target_db")
-        assert roles == [{"role": "read", "db": "target_db"}]
+        assert roles == []
 
     def test_roles_are_deduplicated(self, mongodb_connector):
         roles = mongodb_connector._normalize_roles(

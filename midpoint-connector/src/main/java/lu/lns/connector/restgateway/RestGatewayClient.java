@@ -185,8 +185,7 @@ public class RestGatewayClient {
             Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
             return GSON.fromJson(response, listType);
         } catch (Exception e) {
-            LOG.warn("Failed to fetch LDAP groups: {}", e.getMessage());
-            return new ArrayList<>();
+            throw new ConnectorException("Failed to fetch LDAP groups", e);
         }
     }
 
@@ -199,8 +198,7 @@ public class RestGatewayClient {
             Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
             return GSON.fromJson(response, listType);
         } catch (Exception e) {
-            LOG.warn("Failed to fetch PostgreSQL profiles: {}", e.getMessage());
-            return new ArrayList<>();
+            throw new ConnectorException("Failed to fetch PostgreSQL profiles", e);
         }
     }
 
@@ -213,8 +211,7 @@ public class RestGatewayClient {
             Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
             return GSON.fromJson(response, listType);
         } catch (Exception e) {
-            LOG.warn("Failed to fetch MySQL profiles: {}", e.getMessage());
-            return new ArrayList<>();
+            throw new ConnectorException("Failed to fetch MySQL profiles", e);
         }
     }
 
@@ -227,8 +224,18 @@ public class RestGatewayClient {
             Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
             return GSON.fromJson(response, listType);
         } catch (Exception e) {
-            LOG.warn("Failed to fetch MongoDB roles: {}", e.getMessage());
-            return new ArrayList<>();
+            throw new ConnectorException("Failed to fetch MongoDB roles", e);
+        }
+    }
+
+    /** Fetch Odoo groups from the gateway. */
+    public List<Map<String, Object>> fetchOdooGroups() {
+        try {
+            String response = get("/entitlements/odoo-groups");
+            Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
+            return GSON.fromJson(response, listType);
+        } catch (Exception e) {
+            throw new ConnectorException("Failed to fetch Odoo groups", e);
         }
     }
 
