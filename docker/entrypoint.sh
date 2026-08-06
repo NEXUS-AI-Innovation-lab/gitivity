@@ -27,8 +27,11 @@ if [ "$1" = "api" ]; then
 elif [ "$1" = "consumer" ]; then
     echo "Starting RabbitMQ Consumer..."
     exec python scripts/start_consumer.py
+elif [ "$1" = "entitlement-sync" ]; then
+    echo "Starting continuous entitlement synchronization..."
+    exec python -m scripts.start_entitlement_sync
 else
     echo "Unknown command: $1"
-    echo "Usage: entrypoint.sh [api|consumer]"
+    echo "Usage: entrypoint.sh [api|consumer|entitlement-sync]"
     exit 1
 fi

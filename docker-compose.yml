@@ -7,6 +7,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: gitivity-postgres
+    restart: always
     environment:
       POSTGRES_USER: gateway
       POSTGRES_PASSWORD: gateway_secret
@@ -27,6 +28,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: gitivity-rabbitmq
+    restart: always
     hostname: rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
@@ -49,6 +51,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: gitivity-redis
+    restart: always
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:6379:6379"
     volumes:
@@ -73,6 +76,7 @@ services:
       dockerfile: docker/Dockerfile.api
     image: gitivity-gateway:latest
     container_name: gitivity-api
+    restart: always
     env_file: .env.docker
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:8100:8100"
@@ -99,6 +103,7 @@ services:
   gateway-consumer:
     image: gitivity-gateway:latest
     container_name: gitivity-consumer
+    restart: always
     env_file: .env.docker
     command: ["consumer"]
     volumes:
@@ -130,12 +135,46 @@ services:
     networks:
       - gateway-network
 
+  # Continuous native entitlement discovery and MidPoint role reconciliation
+  entitlement-sync:
+    image: gitivity-gateway:latest
+    container_name: gitivity-entitlement-sync
+    env_file: .env.docker
+    command: ["entitlement-sync"]
+    environment:
+      ENTITLEMENT_SYNC_CONFIG_PATH: /app/config/entitlement_sync.yaml
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      gateway-api:
+        condition: service_healthy
+      gateway-http:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import pathlib;
+          assert b"scripts.start_entitlement_sync" in
+          pathlib.Path("/proc/1/cmdline").read_bytes()
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: always
+    networks:
+      - gateway-network
+
   # Gateway HTTP - Flask entitlements server for MidPoint
   gateway-http:
     build:
       context: .
       dockerfile: docker/Dockerfile.gateway-http
     container_name: gitivity-http
+    restart: always
     env_file: .env.docker
     environment:
       TARGET_CATALOG_PATH: /app/config/targets.yaml
@@ -159,6 +198,7 @@ services:
   ldap:
     image: openmicroscopy/apacheds:0.7.0
     container_name: gitivity-ldap
+    restart: always
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:${LDAP_TARGET_HOST_PORT:-10389}:10389"
     volumes:
@@ -172,6 +212,7 @@ services:
   mysql-target:
     image: mysql:8.0
     container_name: gitivity-mysql
+    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_PASSWORD}"
       MYSQL_DATABASE: "${MYSQL_DATABASE}"
@@ -193,6 +234,7 @@ services:
   postgresql-target:
     image: postgres:15-alpine
     container_name: gitivity-postgresql
+    restart: always
     environment:
       POSTGRES_USER: "${POSTGRESQL_USER}"
       POSTGRES_PASSWORD: "${POSTGRESQL_PASSWORD}"
@@ -216,6 +258,7 @@ services:
     # MongoDB 8.x currently crashes on Linux kernel 6.19; 7.0 remains portable.
     image: mongo:7.0
     container_name: gitivity-mongodb
+    restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: "${MONGODB_USER}"
       MONGO_INITDB_ROOT_PASSWORD: "${MONGODB_PASSWORD}"
@@ -238,6 +281,7 @@ services:
   odoo-db:
     image: postgres:15-alpine
     container_name: gitivity-odoo-db
+    restart: always
     environment:
       POSTGRES_USER: odoo
       POSTGRES_PASSWORD: odoo_secret
@@ -296,6 +340,7 @@ services:
   odoo:
     image: odoo:17
     container_name: gitivity-odoo
+    restart: always
     depends_on:
       odoo-init:
         condition: service_completed_successfully
@@ -319,6 +364,7 @@ services:
 
   midpoint_data:
     image: postgres:16-alpine
+    restart: always
     environment:
      - POSTGRES_PASSWORD=db.secret.pw.007
      - POSTGRES_USER=midpoint
@@ -332,6 +378,7 @@ services:
 
   data_init:
     image: evolveum/midpoint:${MP_VER:-latest}-alpine
+    restart: "no"
     command: >
       bash -c "
       cd /opt/midpoint ;
@@ -362,6 +409,7 @@ services:
   midpoint_server:
     container_name: gitivity-midpoint
     image: evolveum/midpoint:${MP_VER:-latest}-alpine
+    restart: always
     depends_on:
       data_init:
         condition: service_completed_successfully

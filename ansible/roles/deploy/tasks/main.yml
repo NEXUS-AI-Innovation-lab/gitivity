@@ -320,7 +320,22 @@
   changed_when: false
   when: not ansible_check_mode
 
-- name: Read image IDs used by the Gateway API and consumer
+- name: Wait for the continuous entitlement synchronization worker to become healthy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{' }}if .State.Health{{ '}}' }}{{ '{{' }}.State.Health.Status{{ '}}' }}{{ '{{' }}else{{ '}}' }}{{ '{{' }}.State.Status{{ '}}' }}{{ '{{' }}end{{ '}}' }}"
+      - gitivity-entitlement-sync
+  register: entitlement_sync_health
+  until: entitlement_sync_health.stdout | trim == "healthy"
+  retries: "{{ (gateway_consumer_wait_timeout | int) // (service_wait_delay | int) }}"
+  delay: "{{ service_wait_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Read image IDs used by the Gateway API, consumer, and entitlement worker
   ansible.builtin.command:
     argv:
       - docker
@@ -331,16 +346,18 @@
   loop:
     - gitivity-api
     - gitivity-consumer
+    - gitivity-entitlement-sync
   register: gateway_runtime_image_ids
   changed_when: false
   when: not ansible_check_mode
 
-- name: Require API and consumer to run the same rebuilt image
+- name: Require all Gateway workers to run the same rebuilt image
   ansible.builtin.assert:
     that:
       - gateway_runtime_image_ids.results | map(attribute='stdout') | unique | length == 1
     fail_msg: >-
-      Gateway API and consumer are not running the same image after rollout.
+      Gateway API, consumer, and entitlement worker are not running the same
+      image after rollout.
   when: not ansible_check_mode
 
 - name: Verify the RabbitMQ queue has an attached consumer

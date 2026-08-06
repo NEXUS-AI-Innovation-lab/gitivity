@@ -1,0 +1,27 @@
+version: 1
+enabled: true
+
+# Delay between two complete discovery cycles.
+poll_interval_seconds: 60
+startup_delay_seconds: 15
+request_timeout_seconds: 30
+gateway_http_url: http://gateway-http:5100
+gateway_api_url: http://gateway-api:8100
+
+# An entitlement must be absent from this many consecutive successful
+# discoveries before a removal approval request is created.
+missing_confirmation_cycles: 3
+
+# Durable state survives worker/container restarts through the shared data volume.
+state_file: /app/data/entitlement-sync-state.json
+
+midpoint:
+  resource_oid: 736ea741-2c73-4478-b5d1-07d84cdf860f
+  import_shadows_on_addition: true
+  delete_shadows_on_disappearance: true
+  object_classes:
+    ldap: CustomLdapGroupObjectClass
+    postgresql: CustomPostgresqlProfileObjectClass
+    mysql: CustomMysqlProfileObjectClass
+    mongodb: CustomMongoDbRoleObjectClass
+    odoo: CustomOdooGroupObjectClass

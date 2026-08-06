@@ -143,6 +143,41 @@ uniquement le rôle MidPoint. L'entitlement natif n'est jamais supprimé.
 Les anciens XML statiques ont été retirés. Au premier déploiement, leurs OID sont
 enregistrés dans le même workflow : ils ne sont donc pas supprimés sans décision.
 
+## Synchronisation continue
+
+Le conteneur `gitivity-entitlement-sync` maintient les entitlements sans attendre
+un nouveau déploiement. À chaque cycle, il découvre toutes les cibles activées,
+crée ou met à jour dans MidPoint le rôle applicatif de chaque nouvel entitlement,
+rafraîchit les shadows et transmet un manifeste confirmé au workflow durable de
+réconciliation.
+
+Les paramètres importants sont regroupés dans
+`config/entitlement_sync.yaml` :
+
+- `enabled` active ou désactive le worker ;
+- `poll_interval_seconds` définit la fréquence de découverte ;
+- `startup_delay_seconds` laisse les services démarrer avant le premier cycle ;
+- `request_timeout_seconds` limite chaque appel HTTP ;
+- `missing_confirmation_cycles` impose plusieurs découvertes réussies et
+  consécutives avant de déclarer un entitlement disparu ;
+- `state_file` conserve ces confirmations dans le volume durable `data` ;
+- `midpoint.resource_oid` désigne la ressource Gateway dans MidPoint ;
+- `midpoint.import_shadows_on_addition` contrôle l'import automatique des
+  shadows après une apparition ;
+- `midpoint.delete_shadows_on_disappearance` supprime du référentiel MidPoint
+  le shadow d'un entitlement dont la disparition est confirmée, sans toucher
+  au système cible ;
+- `midpoint.object_classes` associe chaque famille au type d'objet MidPoint à
+  importer.
+
+Après modification de ce fichier, redémarrer uniquement le worker avec
+`docker compose restart entitlement-sync` pour recharger les paramètres.
+
+Une découverte en erreur n'est jamais réconciliée et n'incrémente aucun compteur
+d'absence. Lorsqu'un seuil d'absence est atteint, le workflow existant crée la
+demande d'approbation. Si l'entitlement réapparaît, la demande en attente est
+annulée et le rôle est conservé.
+
 Pour le moment, `deployment.environment` suit le mécanisme existant et peut
 contenir les valeurs directement. L'adoption d'Ansible Vault pourra se faire
 ultérieurement sans modifier le générateur.

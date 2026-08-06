@@ -350,6 +350,102 @@ class MidPointClient:
             logger.error(f"Error fetching MidPoint role {oid}: {e}")
             return None
 
+    async def upsert_role_xml(self, oid: str, xml: str) -> str:
+        """Create or replace a role using its deterministic OID."""
+        client = await self._get_client()
+        headers = {"Accept": "application/json", "Content-Type": "application/xml"}
+        existing = await client.get(f"/ws/rest/roles/{oid}")
+        if existing.status_code == 200:
+            response = await client.put(
+                f"/ws/rest/roles/{oid}", content=xml, headers=headers
+            )
+            response.raise_for_status()
+            return "updated"
+        if existing.status_code != 404:
+            existing.raise_for_status()
+
+        response = await client.post("/ws/rest/roles", content=xml, headers=headers)
+        if response.status_code == 409:
+            response = await client.put(
+                f"/ws/rest/roles/{oid}", content=xml, headers=headers
+            )
+            response.raise_for_status()
+            return "updated"
+        response.raise_for_status()
+        return "created"
+
+    async def import_resource_object_class(
+        self, resource_oid: str, object_class: str
+    ) -> None:
+        """Ask MidPoint to refresh entitlement shadows for one object class."""
+        client = await self._get_client()
+        response = await client.post(
+            f"/ws/rest/resources/{resource_oid}/import/{object_class}",
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+        )
+        if response.status_code not in {200, 201, 202, 303}:
+            response.raise_for_status()
+
+    @staticmethod
+    def _mql_string(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    async def delete_stale_entitlement_shadows(
+        self,
+        resource_oid: str,
+        object_class: str,
+        managed_prefix: str,
+        active_names: set[str],
+    ) -> list[str]:
+        """Delete stale managed shadows without touching native objects."""
+        resource = self._mql_string(resource_oid)
+        object_type = self._mql_string(object_class)
+        query = (
+            f'resourceRef matches (oid = "{resource}") '
+            f'and objectClass = "ri:{object_type}"'
+        )
+        client = await self._get_client()
+        response = await client.post(
+            "/ws/rest/shadows/search",
+            params={"options": "raw"},
+            json={"query": {"filter": {"text": query}}},
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        )
+        response.raise_for_status()
+        objects = response.json().get("object", {}).get("object", [])
+        if isinstance(objects, dict):
+            objects = [objects]
+
+        matching_shadows: list[tuple[str, str]] = []
+        for shadow in objects:
+            resource_ref = shadow.get("resourceRef", {})
+            shadow_name = shadow.get("name")
+            if (
+                resource_ref.get("oid") == resource_oid
+                and shadow.get("objectClass") == f"ri:{object_class}"
+                and isinstance(shadow_name, str)
+                and shadow_name.startswith(f"{managed_prefix}.")
+                and shadow_name not in active_names
+                and shadow.get("oid")
+            ):
+                matching_shadows.append((shadow["oid"], shadow_name))
+
+        for shadow_oid, shadow_name in matching_shadows:
+            deletion = await client.delete(
+                f"/ws/rest/shadows/{shadow_oid}", params={"options": "raw"}
+            )
+            if deletion.status_code != 404:
+                deletion.raise_for_status()
+            logger.info(
+                "Deleted stale MidPoint shadow: oid=%s name=%s",
+                shadow_oid,
+                shadow_name,
+            )
+        return [name for _, name in matching_shadows]
+
     async def unassign_role(self, user_oid: str, role_oid: str) -> bool:
         """Remove a role assignment from a user in MidPoint
 
