@@ -3,12 +3,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.config.target_catalog import TargetDefinition
 from app.core.connectors.factory import ConnectorFactory, get_connector
+from app.core.connectors.ldap_connector import LDAPConnector
+from app.core.connectors.mongodb_connector import MongoDBConnector
 from app.core.connectors.mysql_connector import MySQLConnector
 from app.core.connectors.postgresql_connector import PostgreSQLConnector
-from app.core.connectors.mongodb_connector import MongoDBConnector
-from app.core.connectors.ldap_connector import LDAPConnector
-from app.config.target_catalog import TargetDefinition
 from app.utils.enums import TargetService
 from app.utils.exceptions import ConnectorNotFoundError
 
@@ -141,6 +141,47 @@ class TestPostgreSQLConnector:
 
     def test_native_role_is_not_remapped(self, pg_connector):
         assert pg_connector._roles_to_pg_roles(["accounting"]) == ["accounting"]
+
+    def test_postgresql_role_candidates_filter_foreign_target_prefixes(self):
+        connector = PostgreSQLConnector().configure_target(
+            TargetDefinition(
+                id="postgresql-ui-demo",
+                type="postgresql",
+                display_name="PostgreSQL UI Demo",
+            )
+        )
+
+        candidates = connector._postgresql_role_candidates(
+            [
+                "postgresql-ui-demo",
+                "postgresql-ui-demo.readonly",
+                "gateway-base",
+                "postgresql-demo.admin",
+            ]
+        )
+
+        assert candidates == ["readonly", "gateway-base"]
+
+    @pytest.mark.asyncio
+    async def test_resolve_native_postgresql_roles_accepts_list_payload(self):
+        connector = PostgreSQLConnector().configure_target(
+            TargetDefinition(
+                id="postgresql-ui-demo",
+                type="postgresql",
+                display_name="PostgreSQL UI Demo",
+            )
+        )
+        connection = AsyncMock()
+        connection.fetchval.side_effect = [None, 1]
+
+        resolved = await connector._resolve_native_postgresql_roles(
+            connection,
+            ["postgresql-ui-demo.readonly", "gateway-base"],
+        )
+
+        assert resolved == ["gateway-base"]
+        assert connection.fetchval.await_args_list[0].args[1] == "readonly"
+        assert connection.fetchval.await_args_list[1].args[1] == "gateway-base"
 
 
 class TestMongoDBConnector:

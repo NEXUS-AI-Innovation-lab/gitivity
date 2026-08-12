@@ -108,3 +108,74 @@ def test_catalog_rejects_duplicate_aliases(tmp_path):
 
     with pytest.raises(ValueError, match="shared"):
         TargetCatalog(path).reload()
+
+
+def test_catalog_merges_and_hot_reloads_runtime_targets(tmp_path):
+    path = tmp_path / "targets.yaml"
+    runtime_path = tmp_path / "runtime-targets.yaml"
+    write_catalog(path)
+    catalog = TargetCatalog(path, runtime_path)
+
+    catalog.add_runtime(
+        catalog.get("reporting").model_copy(
+            update={"id": "sandbox", "display_name": "Sandbox", "aliases": []}
+        )
+    )
+
+    assert catalog.get("sandbox").connection["host"] == "localhost"
+    assert catalog.source("reporting") == "persistent"
+    assert catalog.source("sandbox") == "runtime"
+    assert "sandbox" in runtime_path.read_text(encoding="utf-8")
+
+
+def test_catalog_rejects_runtime_identifier_collision(tmp_path):
+    path = tmp_path / "targets.yaml"
+    runtime_path = tmp_path / "runtime-targets.yaml"
+    write_catalog(path)
+    catalog = TargetCatalog(path, runtime_path)
+
+    with pytest.raises(ValueError, match="already exist"):
+        catalog.add_runtime(
+            catalog.get("reporting").model_copy(
+                update={"id": "sandbox", "aliases": ["reports"]}
+            )
+        )
+
+
+def test_catalog_only_removes_runtime_targets(tmp_path):
+    path = tmp_path / "targets.yaml"
+    runtime_path = tmp_path / "runtime-targets.yaml"
+    write_catalog(path)
+    catalog = TargetCatalog(path, runtime_path)
+    runtime_target = catalog.get("reporting").model_copy(
+        update={"id": "sandbox", "aliases": []}
+    )
+    catalog.add_runtime(runtime_target)
+
+    catalog.remove_runtime("sandbox")
+
+    with pytest.raises(KeyError):
+        catalog.get("sandbox")
+    with pytest.raises(ValueError, match="Persistent targets"):
+        catalog.remove_runtime("reporting")
+
+
+def test_persistent_export_overrides_preserved_runtime_entry(tmp_path):
+    path = tmp_path / "targets.yaml"
+    runtime_path = tmp_path / "runtime-targets.yaml"
+    write_catalog(path)
+    catalog = TargetCatalog(path, runtime_path)
+    catalog.add_runtime(
+        catalog.get("reporting").model_copy(
+            update={"id": "sandbox", "display_name": "Runtime", "aliases": []}
+        )
+    )
+
+    persistent = path.read_text(encoding="utf-8").replace(
+        "id: reporting", "id: sandbox"
+    ).replace("display_name: Reporting", "display_name: Persistent")
+    path.write_text(persistent, encoding="utf-8")
+    catalog.reload(force=True)
+
+    assert catalog.get("sandbox").display_name == "Persistent"
+    assert catalog.source("sandbox") == "persistent"

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     TARGET_CATALOG_PATH: str = "config/targets.yaml"
+    RUNTIME_TARGET_CATALOG_PATH: str = "data/runtime-targets.yaml"
     ENTITLEMENT_SYNC_CONFIG_PATH: str = "config/entitlement_sync.yaml"
 
     # Database

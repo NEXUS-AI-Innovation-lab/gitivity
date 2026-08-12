@@ -102,3 +102,7 @@ service_wait_timeout: 300
 service_wait_delay: 10
 midpoint_connector_wait_timeout: 120
 gateway_consumer_wait_timeout: 120
+
+# Runtime targets are intended for tests. On the next Ansible deployment,
+# start their approval-based cleanup unless they were exported to targets.yaml.
+decommission_unexported_runtime_targets_on_deploy: true

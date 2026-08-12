@@ -39,6 +39,7 @@ env/
 .env
 .env.local
 .env.*.local
+data/runtime-targets.yaml
 
 # Prisma
 prisma/migrations/

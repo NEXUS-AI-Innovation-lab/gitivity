@@ -41,10 +41,41 @@ def interpolate(value: Any) -> Any:
     )
 
 
-def load_target(path: Path, target_id: str) -> dict[str, Any]:
-    document = interpolate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
-    for target in document.get("targets", []):
-        if target.get("enabled", True) and target.get("id") == target_id:
+def load_targets(paths: list[Path]) -> list[dict[str, Any]]:
+    """Merge enabled targets from persistent and optional runtime catalogues."""
+    targets: list[dict[str, Any]] = []
+    identifiers: dict[str, str] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        document = interpolate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+        for target in document.get("targets", []):
+            if not target.get("enabled", True):
+                continue
+            target_id = str(target.get("id", "")).strip().lower()
+            if not target_id:
+                raise RuntimeError(f"Target without id in {path}")
+            for identifier in [target_id, *target.get("aliases", [])]:
+                normalized = str(identifier).strip().lower()
+                owner = identifiers.get(normalized)
+                if owner and owner != target_id:
+                    raise RuntimeError(
+                        f"Target identifier {normalized!r} is shared by "
+                        f"{owner!r} and {target_id!r}"
+                    )
+                identifiers[normalized] = target_id
+            targets.append(target)
+    return targets
+
+
+def load_target(
+    path: Path,
+    target_id: str,
+    runtime_path: Path | None = None,
+) -> dict[str, Any]:
+    paths = [path, *([runtime_path] if runtime_path is not None else [])]
+    for target in load_targets(paths):
+        if target.get("id") == target_id:
             return target
     raise RuntimeError(f"Enabled target {target_id!r} not found")
 
@@ -218,7 +249,7 @@ def mongodb_entitlements(target: dict[str, Any]) -> tuple[list[tuple[str, str]],
 
 def postgresql_entitlements(
     target: dict[str, Any],
-) -> tuple[list[tuple[str, str]], bool]:
+) -> tuple[list[tuple[str, str]], bool, list[str]]:
     import psycopg2
     from psycopg2 import sql
 
@@ -288,10 +319,23 @@ def postgresql_entitlements(
                             "GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}"
                         ).format(sql.Identifier(name))
                     )
-            cursor.execute("SELECT rolname FROM pg_roles ORDER BY rolname")
-            return [
+            # PostgreSQL stores both login accounts and group/privilege roles in
+            # pg_roles. Only NOLOGIN roles are native entitlements; exposing a
+            # LOGIN account here would create a bogus MidPoint application role
+            # and a disappearance approval when that account is deleted.
+            cursor.execute(
+                "SELECT rolname FROM pg_roles "
+                "WHERE NOT rolcanlogin ORDER BY rolname"
+            )
+            entitlements = [
                 (row[0], "PostgreSQL native role") for row in cursor.fetchall()
-            ], changed
+            ]
+            cursor.execute(
+                "SELECT rolname FROM pg_roles "
+                "WHERE rolcanlogin ORDER BY rolname"
+            )
+            login_accounts = [row[0] for row in cursor.fetchall()]
+            return entitlements, changed, login_accounts
     finally:
         connection.close()
 
@@ -397,14 +441,18 @@ def synchronize(target: dict[str, Any]) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(30):
         try:
-            names, changed = PROVIDERS[provider_name](target)
-            return {
+            provider_result = PROVIDERS[provider_name](target)
+            names, changed = provider_result[:2]
+            manifest = {
                 "target_id": target["id"],
                 "target_type": target["type"],
                 "display_name": target.get("display_name", target["id"]),
                 "changed": changed,
                 "entitlements": normalize(target, names),
             }
+            if len(provider_result) > 2:
+                manifest["excluded_native_names"] = provider_result[2]
+            return manifest
         except Exception as exc:  # pragma: no cover - service startup timing
             last_error = exc
             if attempt == 29:

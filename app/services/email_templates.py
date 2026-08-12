@@ -3,6 +3,7 @@
 Pure functions (no I/O) ported from the former n8n approval workflow
 ("Build Approver Email" and "Build Confirmation Email" Code nodes).
 """
+import html
 
 OPERATION_LABELS = {
     "CREATE_USER": "Creation",
@@ -317,6 +318,102 @@ def build_confirmation_email(
 
     subject = f"[Gateway IAM] {operation_label} de compte - {service_label}"
     return email, subject, html_body
+
+
+def build_entitlement_approval_email(
+    *,
+    request_id: str,
+    role_name: str,
+    native_name: str,
+    target_id: str,
+    approver_name: str,
+    approver_level: int,
+    total_approvers: int,
+    approve_url: str,
+    keep_url: str,
+    renew_url: str,
+    replacement_role_name: str | None = None,
+    legacy: bool = False,
+) -> tuple[str, str]:
+    """Build an entitlement-removal approval in the standard Gateway UI."""
+    title = "Migration d'un ancien rôle" if legacy else "Entitlement natif disparu"
+    subject = (
+        f"[Gateway IAM] Migration d'un ancien rôle - {role_name}"
+        if legacy
+        else f"[Gateway IAM] Entitlement disparu - {role_name}"
+    )
+    replacement_row = (
+        f"<tr><td>Rôle remplaçant</td><td><strong>{html.escape(replacement_role_name)}</strong></td></tr>"
+        if replacement_role_name else ""
+    )
+    level_info = (
+        '<div class="level-info">'
+        f"<strong>Approbation niveau {approver_level}/{total_approvers}</strong><br>"
+        "La décision sera transmise au niveau suivant si nécessaire."
+        "</div>"
+        if total_approvers > 1 else ""
+    )
+    body = (
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+        "body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px}"
+        ".container{max-width:700px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}"
+        ".header{background:#2c3e50;color:#fff;padding:20px 30px}.header h1{margin:0;font-size:20px}"
+        ".content{padding:30px}.info-table{width:100%;border-collapse:collapse;margin:20px 0}"
+        ".info-table td{padding:10px 15px;border-bottom:1px solid #eee}.info-table td:first-child{font-weight:bold;color:#555;width:160px}"
+        ".warning{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:15px;margin:20px 0;color:#856404}"
+        ".level-info{background:#e3f2fd;border:1px solid #2196f3;border-radius:6px;padding:15px;margin:20px 0;color:#1565c0}"
+        ".buttons{text-align:center;margin:30px 0}.btn{display:inline-block;padding:14px 30px;margin:6px;border-radius:6px;text-decoration:none;font-weight:bold}"
+        ".btn-approve{background:#27ae60;color:#fff}.btn-reject{background:#e74c3c;color:#fff}"
+        ".renew{text-align:center;font-size:13px}.footer{background:#f8f9fa;padding:15px 30px;text-align:center;color:#888;font-size:12px}"
+        "</style></head><body><div class=\"container\">"
+        f'<div class="header"><h1>Gateway IAM - {html.escape(title)}</h1></div>'
+        '<div class="content">'
+        f"<p>Bonjour <strong>{html.escape(approver_name)}</strong>,</p>"
+        "<p>Une suppression de rôle MidPoint nécessite votre approbation :</p>"
+        f"{level_info}"
+        '<table class="info-table">'
+        f"<tr><td>Rôle MidPoint</td><td><strong>{html.escape(role_name)}</strong></td></tr>"
+        f"<tr><td>Entitlement natif</td><td><code>{html.escape(native_name)}</code></td></tr>"
+        f"<tr><td>Cible</td><td><strong>{html.escape(target_id)}</strong></td></tr>"
+        f"{replacement_row}"
+        f'<tr><td>Demande ID</td><td><code style="font-size:11px;color:#888">{html.escape(request_id)}</code></td></tr>'
+        "</table>"
+        '<div class="warning"><strong>Action proposée :</strong> désassigner ce rôle de tous les objets puis le supprimer de MidPoint.</div>'
+        '<div class="buttons">'
+        f'<a href="{html.escape(approve_url, quote=True)}" class="btn btn-approve">APPROUVER LA SUPPRESSION</a>'
+        f'<a href="{html.escape(keep_url, quote=True)}" class="btn btn-reject">CONSERVER LE RÔLE</a>'
+        "</div>"
+        f'<div class="renew"><a href="{html.escape(renew_url, quote=True)}">Renouveler ce lien sécurisé</a></div>'
+        "</div><div class=\"footer\">Gateway IAM Provisioning System</div>"
+        "</div></body></html>"
+    )
+    return subject, body
+
+
+def build_entitlement_result_email(
+    *, role_name: str, target_id: str, request_id: str, success: bool, detail: str
+) -> tuple[str, str]:
+    """Build the final entitlement cleanup notification in the standard UI."""
+    title = "Nettoyage terminé" if success else "Échec du nettoyage"
+    color = "#27ae60" if success else "#e74c3c"
+    subject = f"[Gateway IAM] {title} - {role_name}"
+    body = (
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+        "body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px}"
+        ".container{max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}"
+        f".header{{background:{color};color:#fff;padding:20px 30px}}.header h1{{margin:0;font-size:20px}}"
+        ".content{padding:30px}.info-box{background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;padding:20px;margin:20px 0}"
+        ".footer{background:#f8f9fa;padding:15px 30px;text-align:center;color:#888;font-size:12px}"
+        "</style></head><body><div class=\"container\">"
+        f'<div class="header"><h1>Gateway IAM - {title}</h1></div><div class="content">'
+        f"<p>{html.escape(detail)}</p><div class=\"info-box\">"
+        f"<p><strong>Rôle :</strong> {html.escape(role_name)}</p>"
+        f"<p><strong>Cible :</strong> {html.escape(target_id)}</p>"
+        f"<p><strong>Demande :</strong> <code>{html.escape(request_id)}</code></p>"
+        "</div></div><div class=\"footer\">Gateway IAM Provisioning System</div>"
+        "</div></body></html>"
+    )
+    return subject, body
 
 
 def build_decision_result_page(

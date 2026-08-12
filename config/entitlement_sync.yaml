@@ -5,6 +5,9 @@ enabled: true
 poll_interval_seconds: 60
 startup_delay_seconds: 15
 request_timeout_seconds: 30
+# MidPoint cleanup scans and updates roles/shadows and can legitimately take
+# several minutes on an established environment.
+decommission_timeout_seconds: 600
 gateway_http_url: http://gateway-http:5100
 gateway_api_url: http://gateway-api:8100
 

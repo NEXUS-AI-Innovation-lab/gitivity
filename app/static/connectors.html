@@ -55,6 +55,17 @@
             align-items: center;
         }
 
+        .back-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.875rem;
+        }
+
+        .back-link:hover { color: var(--text-primary); }
+
         .btn {
             padding: 0.5rem 1rem;
             border-radius: 0.5rem;
@@ -85,6 +96,8 @@
         .btn-secondary:hover {
             background: var(--border);
         }
+
+        .btn:disabled { opacity: 0.65; cursor: wait; }
 
         /* Main content */
         .main {
@@ -122,7 +135,7 @@
         /* Connector Grid */
         .connector-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
             gap: 1rem;
         }
 
@@ -132,6 +145,7 @@
             padding: 1.25rem;
             border: 1px solid var(--border);
             transition: all 0.2s;
+            min-width: 0;
         }
 
         .connector-card:hover {
@@ -140,19 +154,22 @@
         }
 
         .connector-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.9rem;
             margin-bottom: 1rem;
         }
 
         .connector-name {
             font-weight: 600;
             font-size: 1rem;
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
             align-items: center;
             gap: 0.5rem;
         }
+
+        .connector-name-text { min-width: 0; overflow-wrap: anywhere; }
 
         .connector-type {
             font-size: 0.75rem;
@@ -163,6 +180,8 @@
         .connector-actions {
             display: flex;
             gap: 0.5rem;
+            flex-wrap: wrap;
+            min-height: 32px;
         }
 
         .icon-btn {
@@ -299,7 +318,8 @@
             color: var(--text-secondary);
         }
 
-        .form-group input {
+        .form-group input,
+        .form-group select {
             width: 100%;
             padding: 0.75rem;
             border-radius: 0.5rem;
@@ -312,6 +332,27 @@
         .form-group input:focus {
             outline: none;
             border-color: var(--accent);
+        }
+
+        .form-help {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-top: 0.35rem;
+        }
+
+        .source-badge {
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            color: var(--text-secondary);
+            font-size: 0.68rem;
+            padding: 0.15rem 0.45rem;
+            white-space: nowrap;
+            align-self: start;
+        }
+
+        .source-runtime {
+            border-color: var(--warning);
+            color: var(--warning);
         }
 
         .modal-footer {
@@ -412,10 +453,19 @@
             margin-bottom: 1rem;
             opacity: 0.5;
         }
+
+        @media (max-width: 720px) {
+            .header { align-items: flex-start; flex-direction: column; gap: 1rem; }
+            .header-actions { width: 100%; flex-wrap: wrap; }
+            .connector-grid { grid-template-columns: minmax(0, 1fr); }
+            .main { padding: 1rem; }
+        }
     </style>
 </head>
 <body>
     <header class="header">
+        <div>
+        <a class="back-link" href="/dashboard/approvers">← Retour au dashboard</a>
         <h1>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -423,9 +473,15 @@
                 <path d="M2 12l10 5 10-5"/>
             </svg>
             Gateway IAM - Connecteurs
-        </h1>
+        </h1></div>
         <div class="header-actions">
-            <button class="btn btn-secondary" onclick="loadConnectors()">
+            <button class="btn btn-primary" onclick="openAddTargetModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Ajouter une base
+            </button>
+            <button class="btn btn-secondary" id="refresh-btn" onclick="loadConnectors(true)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M23 4v6h-6"/>
                     <path d="M1 20v-6h6"/>
@@ -460,7 +516,7 @@
             </div>
         </section>
 
-        <!-- MidPoint Connectors -->
+        <!-- MidPoint Resources -->
         <section class="section">
             <div class="section-header">
                 <h2 class="section-title">
@@ -468,7 +524,7 @@
                         <circle cx="12" cy="12" r="10"/>
                         <path d="M12 6v6l4 2"/>
                     </svg>
-                    Connecteurs MidPoint
+                    Ressources MidPoint
                     <span class="badge" id="midpoint-count">0</span>
                 </h2>
             </div>
@@ -524,6 +580,50 @@
         </div>
     </div>
 
+    <!-- Runtime target modal -->
+    <div class="modal-overlay" id="add-target-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Ajouter une cible de test</h2>
+                <button class="icon-btn" onclick="closeAddTargetModal()" aria-label="Fermer">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="banner banner-warning">
+                    Cette cible sera active immédiatement, mais restera distincte de la configuration Ansible. Exportez-la après validation pour la rendre persistante.
+                </div>
+                <div class="form-group">
+                    <label for="new-target-type">Type</label>
+                    <select id="new-target-type" onchange="renderConnectionFields()">
+                        <option value="postgresql">PostgreSQL</option>
+                        <option value="mysql">MySQL / MariaDB</option>
+                        <option value="mongodb">MongoDB</option>
+                        <option value="ldap">LDAP</option>
+                        <option value="odoo">Odoo</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="new-target-id">Identifiant unique</label>
+                    <input id="new-target-id" placeholder="postgresql-test">
+                    <div class="form-help">Minuscules, chiffres, tirets et underscores uniquement.</div>
+                </div>
+                <div class="form-group">
+                    <label for="new-target-name">Nom affiché</label>
+                    <input id="new-target-name" placeholder="PostgreSQL Test">
+                </div>
+                <div class="form-group">
+                    <label for="new-target-aliases">Alias (séparés par des virgules)</label>
+                    <input id="new-target-aliases" placeholder="pg-test">
+                </div>
+                <div id="new-target-connection"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAddTargetModal()">Annuler</button>
+                <button class="btn btn-secondary" onclick="testNewTarget()">Tester sans activer</button>
+                <button class="btn btn-primary" onclick="activateNewTarget()">Tester et activer</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
@@ -531,19 +631,59 @@
         let currentConnector = null;
         let currentConnectorType = null;
 
+        const connectionFields = {
+            postgresql: [
+                ['host', 'Hôte', 'text', '10.10.0.1'], ['port', 'Port', 'number', '5432'],
+                ['user', 'Utilisateur de provisioning', 'text', 'postgres'], ['password', 'Mot de passe', 'password', ''],
+                ['database', 'Base', 'text', 'postgres'], ['connect_timeout', 'Timeout (secondes)', 'number', '10']
+            ],
+            mysql: [
+                ['host', 'Hôte', 'text', '10.10.0.1'], ['port', 'Port', 'number', '3306'],
+                ['user', 'Utilisateur de provisioning', 'text', 'root'], ['password', 'Mot de passe', 'password', ''],
+                ['database', 'Base', 'text', 'mysql'], ['connect_timeout', 'Timeout (secondes)', 'number', '10']
+            ],
+            mongodb: [
+                ['host', 'Hôte', 'text', '10.10.0.1'], ['port', 'Port', 'number', '27017'],
+                ['user', 'Utilisateur de provisioning', 'text', 'root'], ['password', 'Mot de passe', 'password', ''],
+                ['database', 'Base cible', 'text', 'target_db'], ['auth_source', "Base d'authentification", 'text', 'admin'],
+                ['connect_timeout', 'Timeout (secondes)', 'number', '10']
+            ],
+            ldap: [
+                ['host', 'Hôte', 'text', '10.10.0.1'], ['port', 'Port', 'number', '389'],
+                ['use_ssl', 'TLS (true/false)', 'text', 'false'], ['bind_dn', 'Bind DN', 'text', 'cn=admin,dc=example,dc=org'],
+                ['bind_password', 'Mot de passe Bind', 'password', ''], ['base_dn', 'Base DN', 'text', 'dc=example,dc=org'],
+                ['users_base_dn', 'Users Base DN', 'text', 'ou=users,dc=example,dc=org'],
+                ['groups_base_dn', 'Groups Base DN', 'text', 'ou=groups,dc=example,dc=org'],
+                ['connect_timeout', 'Timeout (secondes)', 'number', '10']
+            ],
+            odoo: [
+                ['url', 'URL', 'text', 'http://10.10.0.1:8069'], ['database', 'Base', 'text', 'odoo'],
+                ['username', 'Utilisateur administrateur', 'text', 'admin'], ['password', 'Mot de passe', 'password', ''],
+                ['timeout', 'Timeout (secondes)', 'number', '30']
+            ]
+        };
+
         // Load connectors on page load
         document.addEventListener('DOMContentLoaded', loadConnectors);
 
-        async function loadConnectors() {
+        async function loadConnectors(showFeedback = false) {
+            const refreshButton = document.getElementById('refresh-btn');
+            const originalContent = refreshButton.innerHTML;
+            refreshButton.disabled = true;
+            refreshButton.innerHTML = '<span class="spinner"></span> Actualisation...';
             try {
                 const response = await fetch('/api/v1/connectors');
                 const data = await response.json();
 
                 renderGatewayConnectors(data.gateway_connectors);
                 renderMidPointConnectors(data.midpoint_connectors, data.midpoint_available);
+                if (showFeedback) showToast('Connecteurs actualisés', 'success');
             } catch (error) {
                 showToast('Erreur lors du chargement des connecteurs', 'error');
                 console.error(error);
+            } finally {
+                refreshButton.disabled = false;
+                refreshButton.innerHTML = originalContent;
             }
         }
 
@@ -615,7 +755,9 @@
             }[connector.status] || connector.status;
 
             const id = type === 'midpoint' ? connector.oid : connector.name;
-            const configHtml = Object.entries(connector.config || {})
+            const runtime = type === 'gateway' && connector.source === 'runtime';
+            const persistent = type === 'gateway' && !runtime;
+            const configHtml = type === 'midpoint' ? '' : Object.entries(connector.config || {})
                 .slice(0, 4)
                 .map(([key, value]) => `
                     <div class="config-row">
@@ -629,10 +771,11 @@
                     <div class="connector-header">
                         <div>
                             <div class="connector-name">
-                                ${connector.name}
+                                <span class="connector-name-text">${connector.name}</span>
+                                ${type === 'gateway' ? `<span class="source-badge ${runtime ? 'source-runtime' : ''}">${runtime ? 'TEST' : 'ANSIBLE'}</span>` : ''}
                             </div>
                             <div class="connector-type">
-                                ${type === 'midpoint' ? (connector.connector_type || 'MidPoint Resource') : 'Gateway Connector'}
+                                ${type === 'midpoint' ? `Connecteur : ${connector.connector_type || 'non renseigné'}` : 'Gateway Connector'}
                             </div>
                         </div>
                         <div class="connector-actions">
@@ -642,12 +785,14 @@
                                     <polyline points="22,4 12,14.01 9,11.01"/>
                                 </svg>
                             </button>
-                            <button class="icon-btn" onclick="openConfig('${id}', '${type}')" title="Configuration">
+                            ${type === 'gateway' && !persistent ? `<button class="icon-btn" onclick="openConfig('${id}', '${type}', '${connector.source || ''}')" title="Configuration">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="12" cy="12" r="3"/>
                                     <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
                                 </svg>
-                            </button>
+                            </button>` : ''}
+                            ${runtime ? `<button class="icon-btn" onclick="exportRuntimeTarget('${id}')" title="Exporter la configuration" aria-label="Exporter">↓</button>` : ''}
+                            ${runtime ? `<button class="icon-btn" onclick="removeRuntimeTarget('${id}')" title="Retirer la cible de test" aria-label="Supprimer">×</button>` : ''}
                         </div>
                     </div>
                     <div class="status ${statusClass}">
@@ -658,6 +803,87 @@
                     ${configHtml ? `<div class="config-preview">${configHtml}</div>` : ''}
                 </div>
             `;
+        }
+
+        function openAddTargetModal() {
+            renderConnectionFields();
+            document.getElementById('add-target-modal').classList.add('active');
+        }
+
+        function closeAddTargetModal() {
+            document.getElementById('add-target-modal').classList.remove('active');
+        }
+
+        function renderConnectionFields() {
+            const type = document.getElementById('new-target-type').value;
+            document.getElementById('new-target-connection').innerHTML = connectionFields[type].map(([key, label, inputType, placeholder]) => `
+                <div class="form-group">
+                    <label for="new-connection-${key}">${label}</label>
+                    <input id="new-connection-${key}" data-connection-key="${key}" type="${inputType}" placeholder="${placeholder}">
+                </div>
+            `).join('');
+        }
+
+        function collectNewTarget() {
+            const connection = {};
+            document.querySelectorAll('#new-target-connection [data-connection-key]').forEach(input => {
+                let value = input.value || input.placeholder;
+                if (input.type === 'number') value = Number(value);
+                if (value === 'true' || value === 'false') value = value === 'true';
+                connection[input.dataset.connectionKey] = value;
+            });
+            return {
+                id: document.getElementById('new-target-id').value.trim(),
+                type: document.getElementById('new-target-type').value,
+                display_name: document.getElementById('new-target-name').value.trim(),
+                aliases: document.getElementById('new-target-aliases').value.split(',').map(value => value.trim()).filter(Boolean),
+                connection
+            };
+        }
+
+        async function submitNewTarget(path) {
+            const response = await fetch(`/api/v1/connectors/${path}`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectNewTarget())
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || 'Requête refusée');
+            return result;
+        }
+
+        async function testNewTarget() {
+            try {
+                const result = await submitNewTarget('runtime-targets/test');
+                showToast(result.success ? `Connexion réussie (${result.latency_ms}ms)` : result.message, result.success ? 'success' : 'error');
+            } catch (error) { showToast(error.message, 'error'); }
+        }
+
+        async function activateNewTarget() {
+            try {
+                await submitNewTarget('runtime-targets');
+                showToast('Cible de test activée', 'success');
+                closeAddTargetModal();
+                loadConnectors();
+            } catch (error) { showToast(error.message, 'error'); }
+        }
+
+        function exportRuntimeTarget(id) {
+            window.location.assign(`/api/v1/connectors/runtime-targets/${encodeURIComponent(id)}/export`);
+        }
+
+        async function removeRuntimeTarget(id) {
+            if (!window.confirm(`Décommissionner la cible de test « ${id} » ? Les comptes seront supprimés après approbation, puis les rôles MidPoint seront nettoyés.`)) return;
+            const response = await fetch(`/api/v1/connectors/runtime-targets/${encodeURIComponent(id)}`, {method: 'DELETE'});
+            if (response.ok) {
+                const result = await response.json();
+                const count = (result.operation_ids || []).length;
+                showToast(count
+                    ? `Décommissionnement démarré : ${count} suppression(s) à approuver`
+                    : 'Décommissionnement démarré, nettoyage automatique en cours', 'success');
+                loadConnectors();
+            } else {
+                const result = await response.json();
+                showToast(result.detail || 'Suppression impossible', 'error');
+            }
         }
 
         async function testConnector(id, type) {
@@ -683,7 +909,7 @@
             }
         }
 
-        async function openConfig(id, type) {
+        async function openConfig(id, type, source = '') {
             currentConnector = id;
             currentConnectorType = type;
 
@@ -698,7 +924,8 @@
                 document.getElementById('modal-title').textContent = `Configuration - ${connector.name}`;
 
                 // Show/hide save button based on type (MidPoint config is read-only for now)
-                document.getElementById('modal-save-btn').style.display = type === 'gateway' ? 'flex' : 'none';
+                document.getElementById('modal-save-btn').style.display =
+                    type === 'gateway' && source === 'runtime' ? 'flex' : 'none';
 
                 // Generate form
                 const form = generateConfigForm(connector.config, type);
@@ -812,6 +1039,9 @@
         // Close modal on overlay click
         document.getElementById('config-modal').addEventListener('click', (e) => {
             if (e.target.classList.contains('modal-overlay')) closeModal();
+        });
+        document.getElementById('add-target-modal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay')) closeAddTargetModal();
         });
     </script>
 </body>

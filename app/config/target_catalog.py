@@ -15,6 +15,7 @@ from app.utils.enums import TargetService
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 _DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config" / "targets.yaml"
+_DEFAULT_RUNTIME_PATH = Path(__file__).resolve().parents[2] / "data" / "runtime-targets.yaml"
 
 
 def _interpolate(value: Any) -> Any:
@@ -135,29 +136,142 @@ class TargetCatalogDocument(BaseModel):
 
 
 class TargetCatalog:
-    """Thread-safe catalogue automatically reloaded when its file changes."""
+    """Thread-safe merged persistent/runtime catalogue with hot reload."""
 
-    def __init__(self, path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        runtime_path: str | Path | None = None,
+    ) -> None:
         configured_path = path or os.getenv("TARGET_CATALOG_PATH") or _DEFAULT_PATH
         self.path = Path(configured_path)
+        configured_runtime_path = runtime_path
+        if path is None and runtime_path is None:
+            configured_runtime_path = (
+                os.getenv("RUNTIME_TARGET_CATALOG_PATH") or _DEFAULT_RUNTIME_PATH
+            )
+        self.runtime_path = (
+            Path(configured_runtime_path) if configured_runtime_path is not None else None
+        )
         self._lock = RLock()
-        self._mtime_ns: int | None = None
+        self._mtimes: tuple[int, int | None] | None = None
         self._document: TargetCatalogDocument | None = None
+        self._persistent_ids: set[str] = set()
+
+    def _runtime_mtime(self) -> int | None:
+        if self.runtime_path is None or not self.runtime_path.exists():
+            return None
+        return self.runtime_path.stat().st_mtime_ns
+
+    def _read_document(self, path: Path) -> TargetCatalogDocument:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw.setdefault("targets", [])
+        return TargetCatalogDocument.model_validate(_interpolate(raw))
 
     def reload(self, force: bool = False) -> TargetCatalogDocument:
         with self._lock:
-            stat = self.path.stat()
+            mtimes = (self.path.stat().st_mtime_ns, self._runtime_mtime())
             if (
                 not force
                 and self._document is not None
-                and self._mtime_ns == stat.st_mtime_ns
+                and self._mtimes == mtimes
             ):
                 return self._document
 
-            raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
-            self._document = TargetCatalogDocument.model_validate(_interpolate(raw))
-            self._mtime_ns = stat.st_mtime_ns
+            persistent = self._read_document(self.path)
+            self._persistent_ids = {target.id for target in persistent.targets}
+            runtime_targets: list[TargetDefinition] = []
+            if self.runtime_path is not None and self.runtime_path.exists():
+                runtime_targets = [
+                    target
+                    for target in self._read_document(self.runtime_path).targets
+                    if target.id not in self._persistent_ids
+                ]
+
+            self._document = TargetCatalogDocument(
+                version=persistent.version,
+                targets=[*persistent.targets, *runtime_targets],
+            )
+            self._mtimes = mtimes
             return self._document
+
+    def source(self, target_id: str) -> str:
+        target = self.get(target_id)
+        return "persistent" if target.id in self._persistent_ids else "runtime"
+
+    def add_runtime(self, target: TargetDefinition) -> TargetDefinition:
+        """Persist a tested target in the runtime overlay."""
+        if self.runtime_path is None:
+            raise ValueError("Runtime target catalogue is disabled")
+
+        with self._lock:
+            document = self.reload(force=True)
+            identifiers = {
+                identifier
+                for existing in document.targets
+                for identifier in [existing.id, *existing.aliases]
+            }
+            requested = {target.id, *target.aliases}
+            conflicts = sorted(identifiers & requested)
+            if conflicts:
+                raise ValueError(
+                    f"Target identifiers already exist: {', '.join(conflicts)}"
+                )
+
+            runtime_targets = [
+                existing
+                for existing in document.targets
+                if existing.id not in self._persistent_ids
+            ]
+            runtime_document = TargetCatalogDocument(
+                version=document.version,
+                targets=[*runtime_targets, target],
+            )
+            self.runtime_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = self.runtime_path.with_suffix(
+                f"{self.runtime_path.suffix}.tmp"
+            )
+            temporary_path.write_text(
+                yaml.safe_dump(
+                    runtime_document.model_dump(mode="json", exclude_defaults=True),
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            temporary_path.replace(self.runtime_path)
+            self.reload(force=True)
+            return self.get(target.id)
+
+    def remove_runtime(self, target_id: str) -> None:
+        """Remove a target from the runtime overlay only."""
+        if self.runtime_path is None:
+            raise ValueError("Runtime target catalogue is disabled")
+
+        with self._lock:
+            target = self.get(target_id)
+            if target.id in self._persistent_ids:
+                raise ValueError("Persistent targets cannot be removed at runtime")
+            runtime_targets = [
+                existing
+                for existing in self.reload().targets
+                if existing.id not in self._persistent_ids and existing.id != target.id
+            ]
+            self.runtime_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = self.runtime_path.with_suffix(
+                f"{self.runtime_path.suffix}.tmp"
+            )
+            temporary_path.write_text(
+                yaml.safe_dump(
+                    TargetCatalogDocument(
+                        version=1,
+                        targets=runtime_targets,
+                    ).model_dump(mode="json", exclude_defaults=True),
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            temporary_path.replace(self.runtime_path)
+            self.reload(force=True)
 
     def targets(self, enabled_only: bool = True) -> list[TargetDefinition]:
         targets = self.reload().targets

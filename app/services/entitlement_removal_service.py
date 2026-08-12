@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-import html
+import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -12,9 +13,22 @@ import httpx
 from prisma import Json, Prisma
 
 from app.api.v1.endpoints.approvers import _read_approvers
+from app.config.entitlement_sync import load_entitlement_sync_config
 from app.config.settings import settings
+from app.config.target_catalog import target_catalog
+from app.core.orchestrator import ProvisioningOrchestrator
+from app.db.redis_client import RedisClient
+from app.db.repositories.approval_redis_repository import ApprovalRedisRepository
+from app.models.domain import MidPointMessage, UserData
 from app.services.email_service import EmailService, email_service
+from app.services.email_templates import (
+    build_entitlement_approval_email,
+    build_entitlement_result_email,
+)
 from app.services.midpoint_client import MidPointClient, midpoint_client
+from app.utils.enums import OperationType
+
+logger = logging.getLogger(__name__)
 
 
 def _token_hash(token: str) -> str:
@@ -32,6 +46,56 @@ class EntitlementRemovalService:
         self.email = email or email_service
         self.midpoint = midpoint or midpoint_client
 
+    async def _request_orphan_account_deletions(
+        self, request: Any, target: Any, result: dict[str, Any]
+    ) -> list[str]:
+        """Request deletion when removed role was a user's last role on target."""
+        remaining_inventory = await self.db.entitlementinventory.find_many(
+            where={"target_id": request.target_id, "active": True}
+        )
+        target_role_oids = {
+            item.role_oid
+            for item in remaining_inventory
+            if item.role_oid != request.role_oid
+        }
+        operation_ids = []
+        approval_repo = ApprovalRedisRepository(await RedisClient.get_client())
+        for user in result.get("affected_users", []):
+            if target_role_oids.intersection(user.get("remaining_role_oids", [])):
+                continue
+            username = user.get("username")
+            if not username:
+                continue
+            previous_state = await approval_repo.get_user_state(
+                username, request.target_id
+            ) or {}
+            operation_ids.append(
+                await ProvisioningOrchestrator(self.db).process_message(
+                    MidPointMessage(
+                        request_id=(
+                            f"entitlement-removal-{request.id}-{user['oid']}-"
+                            f"{uuid.uuid4()}"
+                        ),
+                        operation_type=OperationType.DELETE_USER,
+                        target_service=target.family,
+                        target_id=target.id,
+                        user_data=UserData(
+                            username=username,
+                            email=previous_state.get("email") or user.get("email"),
+                            first_name=previous_state.get("first_name"),
+                            last_name=previous_state.get("last_name"),
+                        ),
+                        metadata={
+                            "source": "entitlement-removal",
+                            "midpoint_user_oid": user["oid"],
+                            "removed_role_oid": request.role_oid,
+                            "reason": "Last target entitlement disappeared",
+                        },
+                    )
+                )
+            )
+        return operation_ids
+
     async def reconcile(self, manifests: list[dict[str, Any]]) -> dict[str, Any]:
         """Persist a complete successful discovery snapshot and open missing-role requests."""
         now = datetime.now(timezone.utc)
@@ -43,6 +107,54 @@ class EntitlementRemovalService:
 
         for manifest in manifests:
             target_id = manifest["target_id"]
+            excluded_native_names = set(manifest.get("excluded_native_names", []))
+            current_native_names = {
+                item["native_name"] for item in manifest.get("entitlements", [])
+            }
+            # Accounts already deleted from PostgreSQL no longer appear in the
+            # live rolcanlogin list. Successful Gateway history still proves
+            # that these names represented login accounts, not entitlements.
+            if manifest.get("target_type") == "postgresql":
+                for operation in await self.db.provisioningoperation.find_many(
+                    where={"status": "SUCCESS"}
+                ):
+                    original = operation.original_message or {}
+                    username = (operation.user_data or {}).get("username")
+                    if (
+                        original.get("target_id") == target_id
+                        and username
+                        and username not in current_native_names
+                    ):
+                        excluded_native_names.add(username)
+            if excluded_native_names:
+                stale_accounts = await self.db.entitlementinventory.find_many(
+                    where={"target_id": target_id}
+                )
+                for inventory in stale_accounts:
+                    if inventory.native_name not in excluded_native_names:
+                        continue
+                    pending = await self.db.entitlementremovalrequest.find_many(
+                        where={"inventory_id": inventory.id, "status": "PENDING"}
+                    )
+                    for request in pending:
+                        await self.db.entitlementremovalrequest.update(
+                            where={"id": request.id},
+                            data={
+                                "status": "CANCELLED",
+                                "decision_reason": (
+                                    "Automatically removed: PostgreSQL LOGIN account "
+                                    "was historically misclassified as an entitlement"
+                                ),
+                                "decision_token_hash": None,
+                                "token_expires_at": None,
+                                "decided_at": now,
+                            },
+                        )
+                    await self.midpoint.remove_role_everywhere(inventory.role_oid)
+                    await self.db.entitlementinventory.delete(
+                        where={"id": inventory.id}
+                    )
+
             for item in manifest.get("entitlements", []):
                 key = item["key"]
                 current.add((target_id, key))
@@ -280,51 +392,57 @@ class EntitlementRemovalService:
         base = f"{settings.GATEWAY_EXTERNAL_URL}/api/v1/entitlement-removals/decision?token={token}"
         renew_url = f"{settings.GATEWAY_EXTERNAL_URL}/api/v1/entitlement-removals/renew?token={token}"
         legacy = request.entitlement_key.startswith("legacy-")
-        subject = (
-            f"[Gateway IAM] Migration d'un ancien rôle - {request.role_name}"
-            if legacy
-            else f"[Gateway IAM] Entitlement disparu - {request.role_name}"
-        )
-        replacement_text = ""
-        if request.replacement_role_name:
-            replacement_text = (
-                f"<p>Le rôle a été remplacé par <b>{html.escape(request.replacement_role_name)}</b>. "
-                "Ses affectations ont été transférées avant cette demande.</p>"
-            )
-        discovery_text = (
-            f"<p>L'ancien rôle <b>{html.escape(request.role_name)}</b> correspond à "
-            f"l'entitlement natif <code>{html.escape(request.native_name)}</code> de "
-            f"<b>{html.escape(request.target_id)}</b>.</p>"
-            if legacy
-            else (
-                f"<p>La découverte confirmée de <b>{html.escape(request.target_id)}</b> "
-                f"ne contient plus <code>{html.escape(request.native_name)}</code>.</p>"
-            )
-        )
-        deletion_question = (
-            f"<p>Faut-il maintenant supprimer l'ancien rôle midPoint "
-            f"<b>{html.escape(request.role_name)}</b> ?</p>"
-            if legacy
-            else (
-                f"<p>Faut-il désassigner puis supprimer le rôle midPoint "
-                f"<b>{html.escape(request.role_name)}</b> ?</p>"
-            )
-        )
-        body = (
-            "<!doctype html><html><body style='font-family:Arial,sans-serif'>"
-            f"<h2>{'Migration d’un ancien rôle' if legacy else 'Entitlement natif disparu'}</h2>"
-            f"<p>Bonjour {html.escape(approver['name'])},</p>"
-            f"{discovery_text}"
-            f"{replacement_text}"
-            f"{deletion_question}"
-            "<p>La demande reste enregistrée sans expiration. Ce lien sécurisé expire et peut être renouvelé.</p>"
-            f"<p><a href='{base}&approved=true'>APPROUVER LA SUPPRESSION</a> &nbsp; "
-            f"<a href='{base}&approved=false'>CONSERVER LE RÔLE</a></p>"
-            f"<p><a href='{renew_url}'>Renouveler ce lien sécurisé</a></p>"
-            f"<small>Demande {request.id} — niveau {request.current_approver_index + 1}/{len(approvers)}</small>"
-            "</body></html>"
+        subject, body = build_entitlement_approval_email(
+            request_id=request.id,
+            role_name=request.role_name,
+            native_name=request.native_name,
+            target_id=request.target_id,
+            approver_name=approver["name"],
+            approver_level=request.current_approver_index + 1,
+            total_approvers=len(approvers),
+            approve_url=f"{base}&approved=true",
+            keep_url=f"{base}&approved=false",
+            renew_url=renew_url,
+            replacement_role_name=request.replacement_role_name,
+            legacy=legacy,
         )
         await self.email.send_html(approver["email"], subject, body)
+
+    async def _send_execution_result(
+        self, request: Any, *, success: bool, detail: str
+    ) -> None:
+        approvers = list(request.approvers)
+        recipients = list(dict.fromkeys(
+            approver.get("email") for approver in approvers if approver.get("email")
+        ))
+        subject, body = build_entitlement_result_email(
+            role_name=request.role_name,
+            target_id=request.target_id,
+            request_id=request.id,
+            success=success,
+            detail=detail,
+        )
+        for recipient in recipients:
+            try:
+                await self.email.send_html(recipient, subject, body)
+            except Exception:
+                logger.exception(
+                    "Could not send entitlement cleanup result to %s", recipient
+                )
+
+    async def process_approved(self) -> list[dict[str, Any]]:
+        """Execute durable approved removals outside the HTTP decision request."""
+        results = []
+        for request in await self.db.entitlementremovalrequest.find_many(
+            where={"status": "APPROVED"}, order={"created_at": "asc"}
+        ):
+            try:
+                results.append(await self.execute(request.id))
+            except Exception as exc:
+                results.append(
+                    {"status": "failed", "request_id": request.id, "error": str(exc)}
+                )
+        return results
 
     async def decide(self, token: str, approved: bool) -> dict[str, Any]:
         request = await self.db.entitlementremovalrequest.find_first(
@@ -371,7 +489,7 @@ class EntitlementRemovalService:
                 "decided_at": now,
             },
         )
-        return await self.execute(request.id)
+        return {"status": "processing", "request_id": request.id}
 
     async def execute(self, request_id: str) -> dict[str, Any]:
         request = await self.db.entitlementremovalrequest.find_unique(
@@ -417,14 +535,50 @@ class EntitlementRemovalService:
             return {"status": "cancelled", "request_id": request.id}
         try:
             result = await self.midpoint.remove_role_everywhere(request.role_oid)
+            if not request.entitlement_key.startswith("legacy-"):
+                target = target_catalog.get(request.target_id)
+                result["delete_operation_ids"] = (
+                    await self._request_orphan_account_deletions(
+                        request, target, result
+                    )
+                )
+                config = load_entitlement_sync_config(
+                    settings.ENTITLEMENT_SYNC_CONFIG_PATH
+                )
+                object_class = config.midpoint.object_classes.get(target.type)
+                if object_class and config.midpoint.delete_shadows_on_disappearance:
+                    active_names = {
+                        str(item["association_value"])
+                        for item in manifest.get("entitlements", [])
+                    }
+                    result["deleted_shadows"] = (
+                        await self.midpoint.delete_stale_entitlement_shadows(
+                            config.midpoint.resource_oid,
+                            object_class,
+                            target.id,
+                            active_names,
+                        )
+                    )
             await self.db.entitlementremovalrequest.update(
                 where={"id": request.id},
                 data={"status": "COMPLETED", "execution_result": Json(result)},
+            )
+            await self._send_execution_result(
+                request,
+                success=True,
+                detail=(
+                    "Le rôle MidPoint a été désassigné et supprimé. "
+                    f"{len(result.get('delete_operation_ids', []))} demande(s) "
+                    "de suppression utilisateur ont été créées."
+                ),
             )
             return {"status": "completed", "request_id": request.id, "result": result}
         except Exception as exc:
             await self.db.entitlementremovalrequest.update(
                 where={"id": request.id},
                 data={"status": "FAILED", "decision_reason": str(exc)},
+            )
+            await self._send_execution_result(
+                request, success=False, detail=f"Erreur : {exc}"
             )
             raise

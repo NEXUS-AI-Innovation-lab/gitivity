@@ -59,6 +59,17 @@ async def test_get_user_state_migrates_legacy_uppercase_key():
 
 
 @pytest.mark.asyncio
+async def test_delete_user_state_clears_canonical_and_legacy_keys():
+    redis = FakeRedis()
+    redis.store["user_state:mongodb:Mario"] = "{}"
+    redis.store["user_state:MONGODB:Mario"] = "{}"
+    repo = ApprovalRedisRepository(redis)
+
+    assert await repo.delete_user_state("Mario", "mongodb") is True
+    assert not any(key.endswith(":Mario") for key in redis.store)
+
+
+@pytest.mark.asyncio
 async def test_rejected_create_checks_and_clears_legacy_service_key():
     redis = FakeRedis()
     redis.store["rejected_create:MONGODB:Mario"] = json.dumps({"operation_id": "op-1"})
@@ -71,3 +82,15 @@ async def test_rejected_create_checks_and_clears_legacy_service_key():
 
     assert await repo.clear_rejected_create("Mario", "mongo") is True
     assert "rejected_create:mongodb:Mario" not in redis.store
+
+
+@pytest.mark.asyncio
+async def test_deleted_user_marker_is_durable_until_cleared():
+    repo = ApprovalRedisRepository(FakeRedis())
+
+    assert await repo.mark_user_deleted("Mario", "MONGODB", "delete-op")
+    assert await repo.was_user_deleted("Mario", "mongodb")
+    assert "deleted_user:mongodb:Mario" in repo.redis.store
+
+    assert await repo.clear_user_deleted("Mario", "mongo")
+    assert not await repo.was_user_deleted("Mario", "mongodb")

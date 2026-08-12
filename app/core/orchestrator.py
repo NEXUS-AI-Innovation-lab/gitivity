@@ -6,8 +6,6 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 
-from prisma import Prisma
-
 from app.config.settings import settings
 from app.core.connectors.factory import ConnectorFactory
 from app.db.redis_client import RedisClient
@@ -18,6 +16,7 @@ from app.services.approval_service import ApprovalService
 from app.services.audit_service import AuditService
 from app.utils.enums import OperationStatus, OperationType, TargetService
 from app.utils.exceptions import ProvisioningError
+from prisma import Prisma
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +65,24 @@ class ProvisioningOrchestrator:
         operation_id: str | None = None
 
         try:
+            # MidPoint updates one shared Gateway shadow. Reassigning a target
+            # role after its account was deleted therefore arrives as UPDATE,
+            # although the target operation must be a CREATE.
+            if message.operation_type == OperationType.UPDATE_USER:
+                approval_repo = await self._get_approval_repo()
+                username = message.user_data.username
+                target_svc = message.target_key
+                if (
+                    await approval_repo.check_rejected_create(username, target_svc)
+                    or await approval_repo.was_user_deleted(username, target_svc)
+                ):
+                    logger.info(
+                        "Converting UPDATE to CREATE for %s on %s: target account absent",
+                        username,
+                        target_svc,
+                    )
+                    message.operation_type = OperationType.CREATE_USER
+
             # Step 1: Create operation record
             operation = await self._create_operation(message)
             operation_id = operation.id
@@ -227,6 +244,11 @@ class ProvisioningOrchestrator:
                 }
             if isinstance(value, list):
                 normalized = [normalize(item) for item in value]
+                if len(normalized) == 1:
+                    # MidPoint serializes a single multivalued attribute either
+                    # as a scalar or a one-item list depending on the delta.
+                    # They represent the same desired target state.
+                    return normalized[0]
                 return sorted(
                     normalized,
                     key=lambda item: json.dumps(
@@ -405,32 +427,22 @@ class ProvisioningOrchestrator:
             elif str(old_val) != str(new_val) and new_val:
                 changes.append({"field": field_label, "old": str(old_val), "new": str(new_val)})
 
-        # Compare roles
-        old_roles = set(old_data.get("roles") or [])
-        new_roles = set(new_data.get("roles") or [])
-        if old_roles != new_roles:
-            added = new_roles - old_roles
-            removed = old_roles - new_roles
-            role_parts = []
-            if added:
-                role_parts.append("Ajoutes: " + ", ".join(sorted(added)))
-            if removed:
-                role_parts.append("Retires: " + ", ".join(sorted(removed)))
-            changes.append({
-                "field": "Roles",
-                "old": ", ".join(sorted(old_roles)) or "Aucun",
-                "new": ", ".join(sorted(new_roles)) or "Aucun",
-                "details": " | ".join(role_parts),
-            })
-
-        # Compare attributes
+        # Global MidPoint roles select targets; target-native access changes are
+        # represented by entitlement attributes below. Comparing the global role
+        # list here would trigger approvals for every already assigned target.
         old_attrs = old_data.get("attributes") or {}
         new_attrs = new_data.get("attributes") or {}
-        for attr_key in set(list(old_attrs.keys()) + list(new_attrs.keys())):
-            old_val = str(old_attrs.get(attr_key, ""))
-            new_val = str(new_attrs.get(attr_key, ""))
-            if old_val != new_val and new_val:
-                changes.append({"field": attr_key, "old": old_val, "new": new_val})
+        for attr_key in new_attrs:
+            if attr_key == "roles":
+                continue
+            old_raw = old_attrs.get(attr_key)
+            new_raw = new_attrs.get(attr_key)
+            old_val = self._stable_user_snapshot({"value": old_raw})
+            new_val = self._stable_user_snapshot({"value": new_raw})
+            if old_val != new_val:
+                changes.append(
+                    {"field": attr_key, "old": str(old_raw or ""), "new": str(new_raw)}
+                )
 
         return changes
 
@@ -589,19 +601,60 @@ class ProvisioningOrchestrator:
                         await approval_repo.clear_rejected_create(
                             username, target_key
                         )
+                        await approval_repo.clear_user_deleted(
+                            username, target_key
+                        )
 
-                # Snapshot the provisioned state in Redis so that the next UPDATE
-                # can compute a diff and detect no-op changes without hitting the target service.
+                # Snapshot live users for future diffs. A successful DELETE must
+                # remove the snapshot; otherwise target decommissioning would
+                # keep rediscovering an account that no longer exists.
                 try:
                     username = (operation.user_data or {}).get("username", "")
                     if username:
-                        await approval_repo.store_user_state(
-                            username,
-                            target_key,
-                            operation.user_data or {},
-                        )
+                        if operation.operation_type == "DELETE_USER":
+                            await approval_repo.delete_user_state(username, target_key)
+                            await approval_repo.mark_user_deleted(
+                                username, target_key, operation_id
+                            )
+                        else:
+                            await approval_repo.store_user_state(
+                                username,
+                                target_key,
+                                operation.user_data or {},
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to store user state for diff: {e}")
+
+                # Entitlement cleanup removes assignments in raw mode. Once
+                # target deletion is approved, remove the now-orphan Gateway
+                # projection without invoking the connector a second time.
+                metadata = message.metadata or {}
+                midpoint_user_oid = metadata.get("midpoint_user_oid")
+                if (
+                    operation.operation_type == "DELETE_USER"
+                    and metadata.get("source") == "entitlement-removal"
+                    and midpoint_user_oid
+                ):
+                    try:
+                        from app.config.entitlement_sync import (
+                            load_entitlement_sync_config,
+                        )
+                        from app.services.midpoint_client import midpoint_client
+
+                        sync_config = load_entitlement_sync_config(
+                            settings.ENTITLEMENT_SYNC_CONFIG_PATH
+                        )
+                        await midpoint_client.remove_user_resource_projection(
+                            midpoint_user_oid,
+                            sync_config.midpoint.resource_oid,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Target account deleted but MidPoint projection cleanup "
+                            "failed for user %s: %s",
+                            midpoint_user_oid,
+                            e,
+                        )
 
                 logger.info(
                     f"Operation {operation_id} completed successfully after approval",
@@ -658,11 +711,37 @@ class ProvisioningOrchestrator:
 
         except Exception as e:
             logger.error(f"Failed to process approval response: {e}")
+            error_stacktrace = traceback.format_exc()
+            error_message = f"Approval callback processing failed: {str(e)}"
+            try:
+                current_operation = await self._repo.get_by_id(operation_id)
+                if (
+                    current_operation
+                    and current_operation.status == OperationStatus.PROCESSING
+                ):
+                    await self._repo.update_status(
+                        id=operation_id,
+                        status=OperationStatus.FAILED,
+                        error_message=error_message,
+                        error_stacktrace=error_stacktrace,
+                    )
+                    await self._audit.log_status_change(
+                        operation_id=operation_id,
+                        old_status=OperationStatus.PROCESSING,
+                        new_status=OperationStatus.FAILED,
+                        message=error_message,
+                    )
+            except Exception as status_error:
+                logger.exception(
+                    "Could not mark failed approval provisioning %s as FAILED: %s",
+                    operation_id,
+                    status_error,
+                )
             await self._audit.log_error(
                 operation_id=operation_id,
                 error_type=type(e).__name__,
-                error_message=f"Approval callback processing failed: {str(e)}",
-                error_stacktrace=traceback.format_exc(),
+                error_message=error_message,
+                error_stacktrace=error_stacktrace,
             )
             raise
 

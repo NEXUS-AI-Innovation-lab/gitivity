@@ -19,6 +19,7 @@ class EntitlementSyncConfig(BaseModel):
     poll_interval_seconds: int = Field(default=60, ge=5)
     startup_delay_seconds: int = Field(default=15, ge=0)
     request_timeout_seconds: int = Field(default=30, ge=1)
+    decommission_timeout_seconds: int = Field(default=600, ge=30)
     gateway_http_url: str = "http://gateway-http:5100"
     gateway_api_url: str = "http://gateway-api:8100"
     missing_confirmation_cycles: int = Field(default=3, ge=1)

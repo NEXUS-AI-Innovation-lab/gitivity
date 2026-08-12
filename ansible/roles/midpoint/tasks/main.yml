@@ -374,3 +374,17 @@
   loop_control:
     label: "{{ item.item }}"
   when: with_targets | bool
+
+- name: Start safe decommissioning of targets not exported to Ansible
+  ansible.builtin.uri:
+    url: >-
+      http://{{ service_bind_ip }}:8100/api/v1/connectors/runtime-targets/decommission-unpersisted
+    method: POST
+    headers:
+      X-Gateway-Reconcile-Token: "{{ midpoint_admin_password }}"
+    status_code: 200
+    timeout: 600
+  when:
+    - not ansible_check_mode
+    - with_targets | bool
+    - decommission_unexported_runtime_targets_on_deploy | bool

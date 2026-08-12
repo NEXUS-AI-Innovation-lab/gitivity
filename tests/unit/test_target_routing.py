@@ -1,13 +1,27 @@
-import pytest
 import sys
 import types
 
+import pytest
+
+from app.config.target_catalog import target_catalog
 from app.core.broker.rabbitmq_consumer import RabbitMQConsumer
 from app.utils.enums import OperationType, TargetService
 
 
 def consumer_without_dependencies() -> RabbitMQConsumer:
     return object.__new__(RabbitMQConsumer)
+
+
+@pytest.fixture(autouse=True)
+def no_durable_target_state(monkeypatch):
+    async def empty_state(_username):
+        return set()
+
+    monkeypatch.setattr(
+        RabbitMQConsumer,
+        "_previous_targets_from_redis",
+        staticmethod(empty_state),
+    )
 
 
 def test_native_message_resolves_catalog_alias():
@@ -75,6 +89,73 @@ async def test_namespaced_entitlements_are_native_for_selected_target():
 
 
 @pytest.mark.asyncio
+async def test_update_projects_roles_and_entitlements_per_target():
+    messages = await consumer_without_dependencies()._parse_midpoint_format({
+        "operation": "UPDATE",
+        "uid": "user-oid-multi-target",
+        "attributes": {
+            "username": "alice",
+            "roles": ["ldap-test", "postgresql", "postgresql-demo"],
+            "ldapGroups": ["ldap-test.test-group"],
+            "postgresqlRole": [
+                "postgresql-demo.gateway-base",
+                "postgresql.gateway-base",
+            ],
+        },
+    })
+
+    by_target = {message.target_id: message for message in messages}
+    assert set(by_target) >= {"ldap-test", "postgresql", "postgresql-demo"}
+
+    ldap = by_target["ldap-test"].user_data
+    assert ldap.roles == ["ldap-test"]
+    assert ldap.attributes["roles"] == ["ldap-test"]
+    assert ldap.attributes["ldapGroups"] == ["test-group"]
+    assert "postgresqlRole" not in ldap.attributes
+
+    postgresql_demo = by_target["postgresql-demo"].user_data
+    assert postgresql_demo.roles == ["postgresql-demo"]
+    assert postgresql_demo.attributes["postgresqlRole"] == ["gateway-base"]
+    assert "ldapGroups" not in postgresql_demo.attributes
+
+    postgresql = by_target["postgresql"].user_data
+    assert postgresql.roles == ["postgresql"]
+    assert postgresql.attributes["postgresqlRole"] == ["gateway-base"]
+
+
+@pytest.mark.asyncio
+async def test_adding_another_target_does_not_change_existing_target_snapshot():
+    consumer = consumer_without_dependencies()
+    common_attributes = {
+        "username": "alice",
+        "email": "alice@example.test",
+        "ldapGroups": ["ldap-test.test-group"],
+    }
+    before = await consumer._parse_midpoint_format({
+        "operation": "UPDATE",
+        "uid": "user-oid-target-snapshot",
+        "attributes": {
+            **common_attributes,
+            "roles": ["ldap-test"],
+        },
+    })
+    after = await consumer._parse_midpoint_format({
+        "operation": "UPDATE",
+        "uid": "user-oid-target-snapshot",
+        "attributes": {
+            **common_attributes,
+            "roles": ["ldap-test", "postgresql-demo"],
+            "postgresqlRole": ["postgresql-demo.gateway-base"],
+        },
+    })
+
+    ldap_before = next(message for message in before if message.target_id == "ldap-test")
+    ldap_after = next(message for message in after if message.target_id == "ldap-test")
+
+    assert ldap_before.user_data.model_dump() == ldap_after.user_data.model_dump()
+
+
+@pytest.mark.asyncio
 async def test_explicit_target_role_wins_over_shared_family_entitlement():
     messages = await consumer_without_dependencies()._parse_midpoint_format({
         "operation": "CREATE",
@@ -107,7 +188,38 @@ async def test_ldap_role_removal_uses_configured_cleanup_mode():
 
     assert len(messages) == 1
     assert messages[0].target_id == "ldap"
-    assert messages[0].operation_type == OperationType.UPDATE_USER
+    expected = (
+        OperationType.UPDATE_USER
+        if target_catalog.get("ldap").routing.delete_mode == "update"
+        else OperationType.DELETE_USER
+    )
+    assert messages[0].operation_type == expected
+
+
+@pytest.mark.asyncio
+async def test_last_assignment_removal_uses_durable_state_after_restart(monkeypatch):
+    async def previous_targets(_username):
+        return {"postgresql-demo"}
+
+    monkeypatch.setattr(
+        RabbitMQConsumer,
+        "_previous_targets_from_redis",
+        staticmethod(previous_targets),
+    )
+
+    messages = await consumer_without_dependencies()._parse_midpoint_format({
+        "operation": "UPDATE",
+        "uid": "user-oid-after-restart",
+        "attributes": {
+            "username": "alice",
+            "roles": [],
+            "postgresqlRole": [],
+        },
+    })
+
+    assert len(messages) == 1
+    assert messages[0].target_id == "postgresql-demo"
+    assert messages[0].operation_type == OperationType.DELETE_USER
 
 
 @pytest.mark.asyncio

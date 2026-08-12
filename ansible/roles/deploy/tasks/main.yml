@@ -121,6 +121,10 @@
       - "--exclude=dumps"
       # Runtime backups are managed on the server and must survive --delete.
       - "--exclude=backups"
+      # Runtime targets and reconciliation state are needed until their
+      # approval-based decommission workflow has completed.
+      - "--exclude=data/runtime-targets.yaml"
+      - "--exclude=data/entitlement-sync-state.json"
       - "--exclude=ansible"
     # /opt/gitivity is a deployment artefact, not a second source tree. Keeping
     # stale Python files here can make a rebuilt image differ from the checkout.

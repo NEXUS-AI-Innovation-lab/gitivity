@@ -84,11 +84,14 @@ class MidPointClient:
             response.raise_for_status()
 
             data = response.json()
-            # MidPoint returns resources in object.list format
-            resources = data.get("object", {}).get("list", [])
-            if not resources and isinstance(data.get("object"), list):
-                resources = data["object"]
-            return resources
+            # Depending on MidPoint version and collection size, REST returns
+            # object.list, object.object, a direct object list, or one object.
+            value: Any = data.get("object", data.get("objectList", {}))
+            if isinstance(value, dict):
+                value = value.get("object", value.get("list", []))
+            if isinstance(value, dict):
+                return [value]
+            return value if isinstance(value, list) else []
         except httpx.HTTPStatusError as e:
             logger.error(
                 f"Failed to fetch MidPoint resources: {e.response.status_code}"
@@ -433,6 +436,10 @@ class MidPointClient:
             ):
                 matching_shadows.append((shadow["oid"], shadow_name))
 
+        stale_oids = {oid for oid, _ in matching_shadows}
+        if stale_oids:
+            await self._remove_references_to_shadows(client, stale_oids)
+
         for shadow_oid, shadow_name in matching_shadows:
             deletion = await client.delete(
                 f"/ws/rest/shadows/{shadow_oid}", params={"options": "raw"}
@@ -445,6 +452,53 @@ class MidPointClient:
                 shadow_name,
             )
         return [name for _, name in matching_shadows]
+
+    async def _remove_references_to_shadows(
+        self, client: httpx.AsyncClient, shadow_oids: set[str]
+    ) -> int:
+        """Remove account association references before deleting entitlement shadows."""
+        listing = await client.get("/ws/rest/shadows", params={"options": "raw"})
+        listing.raise_for_status()
+        removed = 0
+        for summary in self._object_list(listing.json()):
+            oid = summary.get("oid")
+            if not oid or oid in shadow_oids:
+                continue
+            detail = await client.get(
+                f"/ws/rest/shadows/{oid}", params={"options": "raw"}
+            )
+            if detail.status_code == 404:
+                continue
+            detail.raise_for_status()
+            shadow = detail.json().get("shadow", detail.json())
+            references = shadow.get("referenceAttributes") or {}
+            deltas = []
+            for name, raw_values in references.items():
+                if name.startswith("@"):
+                    continue
+                values = raw_values if isinstance(raw_values, list) else [raw_values]
+                matching = [
+                    value
+                    for value in values
+                    if isinstance(value, dict) and value.get("oid") in shadow_oids
+                ]
+                if matching:
+                    deltas.append(
+                        {
+                            "modificationType": "delete",
+                            "path": f"referenceAttributes/{name}",
+                            "value": matching,
+                        }
+                    )
+                    removed += len(matching)
+            if deltas:
+                patch = await client.patch(
+                    f"/ws/rest/shadows/{oid}",
+                    params={"options": "raw"},
+                    json={"objectModification": {"itemDelta": deltas}},
+                )
+                patch.raise_for_status()
+        return removed
 
     async def unassign_role(self, user_oid: str, role_oid: str) -> bool:
         """Remove a role assignment from a user in MidPoint
@@ -532,6 +586,7 @@ class MidPointClient:
 
         references_removed = 0
         modified_objects = 0
+        affected_users: list[dict[str, Any]] = []
         for endpoint in ("users", "roles", "orgs", "services"):
             response = await client.get(f"/ws/rest/{endpoint}")
             response.raise_for_status()
@@ -560,23 +615,58 @@ class MidPointClient:
                         if self._references_role(value, role_oid)
                     ]
                     if matching:
+                        # MidPoint GET responses include computed activation and
+                        # value metadata that cannot be parsed back in a PATCH.
+                        # Container value IDs identify the exact assignment and
+                        # avoid resubmitting this read-only metadata.
+                        deletions = [
+                            {"@id": value["@id"]}
+                            if isinstance(value, dict) and "@id" in value
+                            else value
+                            for value in matching
+                        ]
                         deltas.append(
                             {
                                 "modificationType": "delete",
                                 "path": path,
-                                "value": matching,
+                                "value": deletions,
                             }
                         )
                         references_removed += len(matching)
                 if deltas:
+                    if endpoint == "users":
+                        name = item.get("name", "")
+                        if isinstance(name, dict):
+                            name = name.get("orig") or name.get("norm") or ""
+                        assignments = item.get("assignment", [])
+                        if isinstance(assignments, dict):
+                            assignments = [assignments]
+                        remaining_role_oids = [
+                            value.get("targetRef", {}).get("oid")
+                            for value in assignments
+                            if isinstance(value, dict)
+                            and not self._references_role(value, role_oid)
+                            and value.get("targetRef", {}).get("oid")
+                        ]
+                        affected_users.append(
+                            {
+                                "oid": oid,
+                                "username": str(name),
+                                "email": item.get("email"),
+                                "remaining_role_oids": remaining_role_oids,
+                            }
+                        )
                     patch_response = await client.patch(
                         f"/ws/rest/{endpoint}/{oid}",
                         json={"objectModification": {"itemDelta": deltas}},
+                        params={"options": "raw"},
                     )
                     patch_response.raise_for_status()
                     modified_objects += 1
 
-        delete_response = await client.delete(f"/ws/rest/roles/{role_oid}")
+        delete_response = await client.delete(
+            f"/ws/rest/roles/{role_oid}", params={"options": "raw"}
+        )
         if delete_response.status_code != 404:
             delete_response.raise_for_status()
         return {
@@ -584,6 +674,63 @@ class MidPointClient:
             "already_absent": delete_response.status_code == 404,
             "references_removed": references_removed,
             "objects_modified": modified_objects,
+            "affected_users": affected_users,
+        }
+
+    async def remove_user_resource_projection(
+        self, user_oid: str, resource_oid: str
+    ) -> dict[str, Any]:
+        """Remove one orphan user projection without invoking its connector again."""
+        client = await self._get_client()
+        response = await client.get(
+            f"/ws/rest/users/{user_oid}", params={"options": "raw"}
+        )
+        if response.status_code == 404:
+            return {"projection_deleted": False, "user_absent": True}
+        response.raise_for_status()
+        user = response.json().get("user", response.json())
+        links = user.get("linkRef", [])
+        if isinstance(links, dict):
+            links = [links]
+
+        matching = []
+        for link in links:
+            shadow_oid = link.get("oid") if isinstance(link, dict) else None
+            if not shadow_oid:
+                continue
+            shadow_response = await client.get(
+                f"/ws/rest/shadows/{shadow_oid}", params={"options": "raw"}
+            )
+            if shadow_response.status_code == 404:
+                continue
+            shadow_response.raise_for_status()
+            shadow = shadow_response.json().get("shadow", shadow_response.json())
+            if shadow.get("resourceRef", {}).get("oid") == resource_oid:
+                matching.append((link, shadow_oid))
+
+        for link, shadow_oid in matching:
+            unlink = await client.patch(
+                f"/ws/rest/users/{user_oid}",
+                json={
+                    "objectModification": {
+                        "itemDelta": [{
+                            "modificationType": "delete",
+                            "path": "linkRef",
+                            "value": [link],
+                        }]
+                    }
+                },
+                params={"options": "raw"},
+            )
+            unlink.raise_for_status()
+            deletion = await client.delete(
+                f"/ws/rest/shadows/{shadow_oid}", params={"options": "raw"}
+            )
+            if deletion.status_code != 404:
+                deletion.raise_for_status()
+        return {
+            "projection_deleted": bool(matching),
+            "deleted_shadow_oids": [oid for _link, oid in matching],
         }
 
     async def replace_role_everywhere(

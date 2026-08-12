@@ -4,13 +4,13 @@ Gateway HTTP Simple - Reçoit les opérations de Midpoint via HTTP
 Supporte aussi les entitlements (groupes LDAP, profils SQL et rôles MongoDB)
 """
 
-from flask import Flask, request, jsonify
 import json
 import os
-import re
 from datetime import datetime
-import yaml
+from pathlib import Path
 
+from flask import Flask, jsonify, request
+from target_entitlements import load_targets as load_target_catalogues
 from target_entitlements import synchronize
 
 app = Flask(__name__)
@@ -20,26 +20,17 @@ TARGET_CATALOG_FILE = os.getenv(
     'TARGET_CATALOG_PATH',
     os.path.join(os.path.dirname(__file__), 'config', 'targets.yaml'),
 )
-ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+RUNTIME_TARGET_CATALOG_FILE = os.getenv(
+    'RUNTIME_TARGET_CATALOG_PATH',
+    '/app/data/runtime-targets.yaml',
+)
+
 
 def load_targets():
-    """Load targets.yaml and resolve its ${VAR:-default} placeholders."""
-    def interpolate(value):
-        if isinstance(value, dict):
-            return {key: interpolate(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [interpolate(item) for item in value]
-        if not isinstance(value, str):
-            return value
-        resolved = ENV_PATTERN.sub(
-            lambda match: os.getenv(match.group(1), match.group(2) or ''),
-            value,
-        )
-        return yaml.safe_load(resolved) if ENV_PATTERN.fullmatch(value) and resolved else resolved
-
-    with open(TARGET_CATALOG_FILE, 'r', encoding='utf-8') as stream:
-        document = interpolate(yaml.safe_load(stream) or {})
-    return [target for target in document.get('targets', []) if target.get('enabled', True)]
+    """Merge the Ansible catalogue with the dashboard runtime overlay."""
+    return load_target_catalogues(
+        [Path(TARGET_CATALOG_FILE), Path(RUNTIME_TARGET_CATALOG_FILE)]
+    )
 
 
 def get_target(target_id=None, target_type=None):

@@ -178,8 +178,10 @@ services:
     env_file: .env.docker
     environment:
       TARGET_CATALOG_PATH: /app/config/targets.yaml
+      RUNTIME_TARGET_CATALOG_PATH: /app/data/runtime-targets.yaml
     volumes:
       - ./config:/app/config:ro
+      - ./data:/app/data:ro
     ports:
       - "${SERVICE_BIND_IP:-10.10.0.1}:5100:5100"
     healthcheck:

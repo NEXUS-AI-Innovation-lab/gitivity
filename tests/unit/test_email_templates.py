@@ -3,6 +3,8 @@ from app.services.email_templates import (
     build_approval_email,
     build_confirmation_email,
     build_decision_result_page,
+    build_entitlement_approval_email,
+    build_entitlement_result_email,
     compute_warnings,
     filter_roles_for_service,
 )
@@ -214,3 +216,40 @@ class TestDecisionResultPage:
     def test_failure_page(self):
         html = build_decision_result_page("Erreur", "Echec", success=False)
         assert "#e74c3c" in html
+
+
+class TestEntitlementEmailTemplates:
+    def test_approval_uses_standard_card_and_action_buttons(self):
+        subject, html = build_entitlement_approval_email(
+            request_id="request-1",
+            role_name="Gateway - PostgreSQL - test_role",
+            native_name="test_role",
+            target_id="postgresql-demo",
+            approver_name="Manager",
+            approver_level=1,
+            total_approvers=2,
+            approve_url="http://gw/approve",
+            keep_url="http://gw/keep",
+            renew_url="http://gw/renew",
+        )
+
+        assert "Entitlement disparu" in subject
+        assert "Gateway IAM - Entitlement natif disparu" in html
+        assert "info-table" in html
+        assert "APPROUVER LA SUPPRESSION" in html
+        assert "CONSERVER LE RÔLE" in html
+        assert "Approbation niveau 1/2" in html
+
+    def test_result_uses_standard_confirmation_card(self):
+        subject, html = build_entitlement_result_email(
+            role_name="Gateway - PostgreSQL - test_role",
+            target_id="postgresql-demo",
+            request_id="request-1",
+            success=True,
+            detail="Le nettoyage est terminé.",
+        )
+
+        assert "Nettoyage terminé" in subject
+        assert "Gateway IAM - Nettoyage terminé" in html
+        assert "info-box" in html
+        assert "#27ae60" in html

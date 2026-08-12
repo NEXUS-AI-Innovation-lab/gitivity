@@ -181,7 +181,9 @@ class PostgreSQLConnector(ProvisioningConnector):
 
                 # Priority 2: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
                 elif postgresql_role:
-                    pg_roles = self._roles_to_pg_roles([postgresql_role])
+                    pg_roles = await self._resolve_native_postgresql_roles(
+                        conn, postgresql_role
+                    )
                     logger.info(f"Using postgresqlRole attribute '{postgresql_role}': {pg_roles}")
                     for pg_role in pg_roles:
                         try:
@@ -373,7 +375,9 @@ class PostgreSQLConnector(ProvisioningConnector):
 
                     # Priority 2: Use postgresqlRole attribute (e.g., "readonly", "readwrite", "admin")
                     elif postgresql_role:
-                        pg_roles = self._roles_to_pg_roles([postgresql_role])
+                        pg_roles = await self._resolve_native_postgresql_roles(
+                            conn, postgresql_role
+                        )
                         logger.info(f"Updating with postgresqlRole '{postgresql_role}': {pg_roles}")
                         for pg_role in pg_roles:
                             try:
@@ -594,6 +598,67 @@ class PostgreSQLConnector(ProvisioningConnector):
             else:
                 pg_roles.add(role)
         return list(pg_roles)
+
+    def _postgresql_role_candidates(self, postgresql_role: Any) -> list[str]:
+        """Normalize one MidPoint PostgreSQL association value or a list."""
+        if postgresql_role is None:
+            return []
+
+        values = (
+            postgresql_role if isinstance(postgresql_role, list) else [postgresql_role]
+        )
+        markers = {"postgresql", "postgres", "pg", self.target_id.lower()}
+        candidates: list[str] = []
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if not normalized or normalized.lower() in markers:
+                continue
+
+            if "." in normalized:
+                prefix, suffix = normalized.rsplit(".", 1)
+                prefix_lower = prefix.strip().lower()
+                suffix = suffix.strip()
+                if prefix_lower == self.target_id.lower() and suffix:
+                    candidates.append(suffix)
+                elif prefix_lower.startswith(("postgresql", "postgres", "pg-")):
+                    # This association belongs to another PostgreSQL target.
+                    continue
+                else:
+                    candidates.append(normalized)
+                    if suffix:
+                        candidates.append(suffix)
+            else:
+                candidates.append(normalized)
+
+        return list(dict.fromkeys(candidates))
+
+    async def _resolve_native_postgresql_roles(
+        self,
+        conn: asyncpg.Connection,
+        postgresql_role: Any,
+    ) -> list[str]:
+        """Return existing native roles applicable to the configured target."""
+        resolved: list[str] = []
+        for candidate in self._postgresql_role_candidates(postgresql_role):
+            exists = await conn.fetchval(
+                "SELECT 1 FROM pg_roles WHERE rolname = $1", candidate
+            )
+            if exists:
+                resolved.append(candidate)
+
+        if resolved:
+            return resolved
+        raise ProvisioningError(
+            operation_id="",
+            target_service=TargetService.POSTGRESQL,
+            error_message=(
+                f"No native PostgreSQL role exists for target {self.target_id}: "
+                f"{postgresql_role}"
+            ),
+            is_retriable=False,
+        )
 
     # Mapping from profile names to PostgreSQL built-in roles
     PROFILE_TO_PG_ROLES: ClassVar[dict[str, list[str]]] = {}

@@ -304,6 +304,31 @@ class ApprovalRedisRepository:
             logger.error(f"Failed to delete decision token: {e}")
             return False
 
+    async def cancel_operation_approval(self, operation_id: str) -> int:
+        """Invalidate every Redis approval artifact for one operation."""
+        deleted = 0
+        chain = await self.get_chain(operation_id)
+        if chain and chain.get("active_token"):
+            deleted += int(
+                await self.delete_decision_token(chain["active_token"])
+            )
+        deleted += int(await self.remove_pending_approval(operation_id))
+        deleted += int(await self.delete_chain(operation_id))
+
+        # Also cover old/incomplete chains whose token was stored but never
+        # copied into approval:chain (e.g. a process interruption).
+        async for key in self.redis.scan_iter(match="approval:token:*"):
+            value = await self.redis.get(key)
+            if not value:
+                continue
+            try:
+                token_data = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if token_data.get("operation_id") == operation_id:
+                deleted += await self.redis.delete(key)
+        return deleted
+
     # --- Rejected CREATE tracking ---
 
     async def store_rejected_create(
@@ -416,6 +441,60 @@ class ApprovalRedisRepository:
         except Exception as e:
             logger.error(f"Failed to get user state: {e}")
             return None
+
+    async def delete_user_state(self, username: str, target_service: str) -> bool:
+        """Delete every canonical or legacy state key after a successful DELETE."""
+        try:
+            deleted = 0
+            for candidate in self._target_variants(target_service):
+                deleted += await self.redis.delete(
+                    f"user_state:{candidate}:{username}"
+                )
+            return deleted > 0
+        except Exception as e:
+            logger.error(f"Failed to delete user state: {e}")
+            return False
+
+    async def mark_user_deleted(
+        self, username: str, target_service: str, operation_id: str
+    ) -> bool:
+        """Remember that the target account is absent until a CREATE succeeds."""
+        try:
+            canonical_target = self._canonical_target_service(target_service)
+            return bool(await self.redis.set(
+                f"deleted_user:{canonical_target}:{username}",
+                json.dumps({
+                    "operation_id": operation_id,
+                    "deleted_at": datetime.now(timezone.utc).isoformat(),
+                }),
+            ))
+        except Exception as e:
+            logger.error(f"Failed to store deleted user marker: {e}")
+            return False
+
+    async def was_user_deleted(self, username: str, target_service: str) -> bool:
+        """Return whether the account was successfully deleted on this target."""
+        try:
+            value, _ = await self._get_first_matching_key(
+                "deleted_user", target_service, username
+            )
+            return value is not None
+        except Exception as e:
+            logger.error(f"Failed to check deleted user marker: {e}")
+            return False
+
+    async def clear_user_deleted(self, username: str, target_service: str) -> bool:
+        """Clear the deletion marker after a successful target CREATE."""
+        try:
+            deleted = 0
+            for candidate in self._target_variants(target_service):
+                deleted += await self.redis.delete(
+                    f"deleted_user:{candidate}:{username}"
+                )
+            return deleted > 0
+        except Exception as e:
+            logger.error(f"Failed to clear deleted user marker: {e}")
+            return False
 
     async def clear_rejected_create(
         self, username: str, target_service: str

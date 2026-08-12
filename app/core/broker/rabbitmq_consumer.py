@@ -274,6 +274,97 @@ class RabbitMQConsumer(BrokerConsumer):
         ]
         return list(dict.fromkeys([*role_targets, *attribute_targets]))
 
+    @classmethod
+    def _project_user_data_for_target(
+        cls,
+        user_data: UserData,
+        target: TargetDefinition,
+    ) -> UserData:
+        """Keep only state that can affect provisioning on one target instance."""
+        projected = user_data.model_copy(deep=True)
+
+        target_roles = [
+            role
+            for role in projected.roles or []
+            if target.id in cls._targets_for_roles([role])
+        ]
+        projected.roles = target_roles
+        projected.attributes["roles"] = target_roles
+
+        entitlement_attributes = {
+            name
+            for configured_target in target_catalog.targets()
+            for name in configured_target.routing.entitlement_attributes
+        }
+        for attribute_name in entitlement_attributes:
+            if attribute_name not in target.routing.entitlement_attributes:
+                projected.attributes.pop(attribute_name, None)
+                continue
+
+            value = projected.attributes.get(attribute_name)
+            values = value if isinstance(value, list) else [value]
+            filtered: list[Any] = []
+            for item in values:
+                if not isinstance(item, str):
+                    if item is not None:
+                        filtered.append(item)
+                    continue
+                matching_target = next(
+                    (
+                        configured_target
+                        for configured_target in target_catalog.targets()
+                        if item.startswith(f"{configured_target.id}.")
+                    ),
+                    None,
+                )
+                if matching_target and matching_target.id != target.id:
+                    continue
+                if matching_target:
+                    item = item[len(matching_target.id) + 1 :]
+                if item not in filtered:
+                    filtered.append(item)
+
+            if isinstance(value, list):
+                projected.attributes[attribute_name] = filtered
+            elif filtered:
+                projected.attributes[attribute_name] = filtered[0]
+            else:
+                projected.attributes[attribute_name] = None
+
+        family_attributes = {
+            "mongodbDatabase": "mongodb",
+            "odooCreateUser": "odoo",
+            "odooCreateEmployee": "odoo",
+        }
+        for attribute_name, family in family_attributes.items():
+            if target.type != family:
+                projected.attributes.pop(attribute_name, None)
+
+        return projected
+
+    @staticmethod
+    async def _previous_targets_from_redis(username: str) -> set[str]:
+        """Return durable target assignments recorded after successful provisioning."""
+        if not username:
+            return set()
+        try:
+            from app.db.redis_client import RedisClient
+            from app.db.repositories.approval_redis_repository import (
+                ApprovalRedisRepository,
+            )
+
+            repository = ApprovalRedisRepository(await RedisClient.get_client())
+            previous = set()
+            for target in target_catalog.targets():
+                if await repository.get_user_state(username, target.id):
+                    previous.add(target.id)
+            return previous
+        except Exception as exc:
+            logger.warning(
+                "Could not load durable target state for %s: %s", username, exc
+            )
+            return set()
+
     @staticmethod
     def _extract_polystring(value: Any) -> str:
         if isinstance(value, dict):
@@ -559,7 +650,7 @@ class RabbitMQConsumer(BrokerConsumer):
 
         # For DELETE operations, determine which services to delete from
         if operation_type == OperationType.DELETE_USER:
-            target_services = []
+            target_services = list(await self._previous_targets_from_redis(username))
 
             # First check the cache for previously provisioned services
             cached_services = _user_services_cache.get(request_id, set())
@@ -584,59 +675,14 @@ class RabbitMQConsumer(BrokerConsumer):
                 logger.info("DELETE operation without any hints - attempting deletion from ALL services")
                 target_services = [target.id for target in target_catalog.targets()]
 
-        # Handle role removal (removedRoles attribute from Java connector)
-        elif removed_roles:
-            logger.info(f"Role removal detected via removedRoles: {removed_roles}")
-            for role in removed_roles:
-                for target_id in self._targets_for_roles([role]):
-                    target = self._target(target_id)
-                    if target_id not in target_services_processed:
-                        target_services_processed.add(target_id)
-                        timestamp_ms = int(time.time() * 1000)
-                        if target.routing.delete_mode == "update":
-                            messages.append(MidPointMessage(
-                                request_id=f"{request_id}-{target_id}-cleanup-{timestamp_ms}",
-                                operation_type=OperationType.UPDATE_USER,
-                                target_service=target.family,
-                                target_id=target.id,
-                                user_data=user_data,
-                                metadata={
-                                    "source": "midpoint",
-                                    "entityType": data.get("entityType", "User"),
-                                    "original_uid": request_id,
-                                    "removed_role": role,
-                                    "reason": "ldap role removed - group cleanup",
-                                },
-                            ))
-                            logger.info(f"Created UPDATE cleanup for removed role on {target_id}")
-                        else:
-                            messages.append(MidPointMessage(
-                                request_id=f"{request_id}-{target_id}-delete-{timestamp_ms}",
-                                operation_type=OperationType.DELETE_USER,
-                                target_service=target.family,
-                                target_id=target.id,
-                                user_data=user_data,
-                                metadata={
-                                    "source": "midpoint",
-                                    "entityType": data.get("entityType", "User"),
-                                    "original_uid": request_id,
-                                    "removed_role": role,
-                                },
-                            ))
-                            logger.info(f"Created DELETE operation for removed role '{role}' -> {target_id}")
-
-            # Map remaining roles to target services for UPDATE
-            target_services = self._targets_for_roles(roles)
-
-        # Handle UPDATE with partial roles - detect missing services that should be deleted
         elif operation_type == OperationType.UPDATE_USER:
-            # Map current roles to target services
             current_services = set(self._targets_for_message(roles, attributes))
-
-            # Get previously provisioned services from cache
-            previous_services = _user_services_cache.get(request_id, set())
-
-            # Services that were removed (in cache but not in current roles)
+            previous_services = set(_user_services_cache.get(request_id, set()))
+            previous_services.update(
+                await self._previous_targets_from_redis(username)
+            )
+            for role in removed_roles:
+                previous_services.update(self._targets_for_roles([role]))
             removed_services = previous_services - current_services
 
             if removed_services:
@@ -645,6 +691,9 @@ class RabbitMQConsumer(BrokerConsumer):
             # Create operations for removed services
             for target_id in removed_services:
                 target = self._target(target_id)
+                target_user_data = self._project_user_data_for_target(
+                    user_data, target
+                )
                 if target.routing.delete_mode == "update":
                     logger.info(f"UPDATE: '{target_id}' was removed - creating cleanup UPDATE")
                     timestamp_ms = int(time.time() * 1000)
@@ -653,7 +702,7 @@ class RabbitMQConsumer(BrokerConsumer):
                         operation_type=OperationType.UPDATE_USER,
                         target_service=target.family,
                         target_id=target.id,
-                        user_data=user_data,
+                        user_data=target_user_data,
                         metadata={
                             "source": "midpoint",
                             "entityType": data.get("entityType", "User"),
@@ -669,7 +718,7 @@ class RabbitMQConsumer(BrokerConsumer):
                         operation_type=OperationType.DELETE_USER,
                         target_service=target.family,
                         target_id=target.id,
-                        user_data=user_data,
+                        user_data=target_user_data,
                         metadata={
                             "source": "midpoint",
                             "entityType": data.get("entityType", "User"),
@@ -700,19 +749,7 @@ class RabbitMQConsumer(BrokerConsumer):
                 continue
             target_services_processed.add(target_id)
             target = self._target(target_id)
-            target_user_data = user_data.model_copy(deep=True)
-            prefix = f"{target.id}."
-            for attribute_name in target.routing.entitlement_attributes:
-                value = target_user_data.attributes.get(attribute_name)
-                if isinstance(value, str) and value.startswith(prefix):
-                    target_user_data.attributes[attribute_name] = value[len(prefix):]
-                elif isinstance(value, list):
-                    target_user_data.attributes[attribute_name] = [
-                        item[len(prefix):]
-                        if isinstance(item, str) and item.startswith(prefix)
-                        else item
-                        for item in value
-                    ]
+            target_user_data = self._project_user_data_for_target(user_data, target)
 
             # Add timestamp to make request_id unique per operation
             timestamp_ms = int(time.time() * 1000)

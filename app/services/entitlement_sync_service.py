@@ -184,6 +184,37 @@ class EntitlementSyncService:
         response.raise_for_status()
         return response.json()
 
+    async def _process_decommissions(self) -> None:
+        try:
+            response = await self.http.post(
+                f"{self.config.gateway_api_url.rstrip('/')}/api/v1/connectors/"
+                "runtime-targets/decommissions/process",
+                headers={
+                    "X-Gateway-Reconcile-Token": settings.ENTITLEMENT_RECONCILE_TOKEN
+                },
+                timeout=self.config.decommission_timeout_seconds,
+            )
+            response.raise_for_status()
+        except Exception:  # noqa: BLE001 - keep entitlement discovery alive
+            logger.exception(
+                "Runtime target decommission processing failed; "
+                "it will be retried during the next synchronization cycle"
+            )
+
+    async def _process_approved_entitlement_removals(self) -> None:
+        try:
+            response = await self.http.post(
+                f"{self.config.gateway_api_url.rstrip('/')}/api/v1/"
+                "entitlement-removals/process-approved",
+                headers={
+                    "X-Gateway-Reconcile-Token": settings.ENTITLEMENT_RECONCILE_TOKEN
+                },
+                timeout=self.config.decommission_timeout_seconds,
+            )
+            response.raise_for_status()
+        except Exception:  # noqa: BLE001 - retry during the next durable cycle
+            logger.exception("Approved entitlement cleanup processing failed")
+
     async def _upsert_additions(
         self, target: TargetDefinition, additions: list[dict[str, Any]]
     ) -> None:
@@ -212,31 +243,14 @@ class EntitlementSyncService:
     async def _delete_disappeared_shadows(
         self, target: TargetDefinition, effective: dict[str, Any]
     ) -> None:
-        if not self.config.midpoint.delete_shadows_on_disappearance:
-            return
-        object_class = self.config.midpoint.object_classes.get(target.type)
-        if not object_class:
-            raise ValueError(
-                f"Missing MidPoint object class for target type {target.type}"
-            )
-        active_names = {
-            str(item["association_value"])
-            for item in effective.get("entitlements", [])
-        }
-        deleted = await self.midpoint.delete_stale_entitlement_shadows(
-            self.config.midpoint.resource_oid,
-            object_class,
-            target.id,
-            active_names,
-        )
-        if deleted:
-            logger.info(
-                "Stale entitlement shadow cleanup completed: target=%s deleted=%s",
-                target.id,
-                deleted,
-            )
+        # The shadow can still be referenced by account associations while the
+        # corresponding role-removal approval is pending. Physical deletion is
+        # therefore performed by EntitlementRemovalService after approval.
+        return
 
     async def run_cycle(self) -> dict[str, Any]:
+        await self._process_decommissions()
+        await self._process_approved_entitlement_removals()
         payload = self.state.load()
         target_states = payload["targets"]
         result: dict[str, Any] = {"synchronized": [], "failed": {}}

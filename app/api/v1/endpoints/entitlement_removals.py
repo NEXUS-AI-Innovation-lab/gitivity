@@ -1,6 +1,5 @@
 """Durable approval endpoints for vanished native entitlements."""
 
-import html
 import secrets
 from typing import Annotated, Any
 
@@ -12,13 +11,16 @@ from pydantic import BaseModel, Field
 from app.config.settings import settings
 from app.db import get_db
 from app.services.entitlement_removal_service import EntitlementRemovalService
+from app.services.email_templates import build_decision_result_page
 
 router = APIRouter(prefix="/entitlement-removals", tags=["Entitlement removals"])
 
 
 class EntitlementManifest(BaseModel):
     target_id: str = Field(min_length=1)
+    target_type: str | None = None
     entitlements: list[dict[str, Any]]
+    excluded_native_names: list[str] = Field(default_factory=list)
 
 
 class LegacyRole(BaseModel):
@@ -83,12 +85,7 @@ async def register_legacy(
 
 
 def _page(title: str, message: str, success: bool = True) -> HTMLResponse:
-    color = "#16794b" if success else "#a12626"
-    return HTMLResponse(
-        "<!doctype html><html><body style='font-family:Arial,sans-serif'>"
-        f"<h2 style='color:{color}'>{html.escape(title)}</h2>"
-        f"<p>{html.escape(message)}</p></body></html>"
-    )
+    return HTMLResponse(build_decision_result_page(title, message, success))
 
 
 @router.get("/decision", response_class=HTMLResponse)
@@ -113,8 +110,32 @@ async def decision(
         "next_level": "La décision est enregistrée et l'approbateur suivant a été notifié.",
         "completed": "Le rôle a été désassigné puis supprimé de midPoint.",
         "cancelled": "L'entitlement est réapparu : la suppression a été annulée.",
+        "processing": (
+            "La décision est enregistrée et la procédure de nettoyage a été lancée. "
+            "Vous recevrez un email lorsqu'elle sera terminée."
+        ),
     }
     return _page("Décision enregistrée", messages.get(status, status))
+
+
+@router.post("/process-approved")
+async def process_approved(
+    reconcile_token: Annotated[
+        str | None, Header(alias="X-Gateway-Reconcile-Token")
+    ] = None,
+    db: Prisma = Depends(get_db),
+) -> dict[str, Any]:
+    if (
+        not settings.ENTITLEMENT_RECONCILE_TOKEN
+        or not reconcile_token
+        or not secrets.compare_digest(
+            reconcile_token, settings.ENTITLEMENT_RECONCILE_TOKEN
+        )
+    ):
+        raise HTTPException(status_code=403, detail="Invalid reconciliation token")
+    return {
+        "processed": await EntitlementRemovalService(db).process_approved()
+    }
 
 
 @router.get("/renew", response_class=HTMLResponse)
