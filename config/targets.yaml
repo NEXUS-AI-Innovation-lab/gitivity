@@ -123,7 +123,7 @@ targets:
       connect_timeout: ${LDAP_CONNECT_TIMEOUT:-10}
     routing:
       entitlement_attributes: [ldapGroups, ldapGroup]
-      delete_mode: update
+      delete_mode: delete
     provisioning:
       group_object_class: groupOfNames
       group_member_attribute: member
@@ -190,7 +190,7 @@ targets:
       connect_timeout: ${LDAP_TEST_CONNECT_TIMEOUT:-10}
     routing:
       entitlement_attributes: [ldapGroups, ldapGroup]
-      delete_mode: update
+      delete_mode: delete
     provisioning:
       group_object_class: groupOfNames
       group_member_attribute: member
@@ -212,3 +212,36 @@ targets:
         LDAP_TEST_GROUPS_BASE_DN: ou=groups,ou=olga,dc=lissi,dc=fr
         LDAP_TEST_USER_OBJECT_CLASS: inetOrgPerson
         LDAP_TEST_CONNECT_TIMEOUT: 10
+
+  - id: postgresql-demo
+    type: postgresql
+    display_name: PostgreSQL Demo
+    enabled: true
+    aliases: [postgresql-demo, pg-demo]
+    connection:
+      host: ${POSTGRESQL_DEMO_HOST:-10.10.0.1}
+      port: ${POSTGRESQL_DEMO_PORT:-5436}
+      user: ${POSTGRESQL_DEMO_USER:-demo_provisioner}
+      password: ${POSTGRESQL_DEMO_PASSWORD:-DemoProvisioner5ecr3t!}
+      database: ${POSTGRESQL_DEMO_DATABASE:-demo_db}
+      connect_timeout: ${POSTGRESQL_DEMO_CONNECT_TIMEOUT:-10}
+    routing:
+      entitlement_attributes: [postgresqlProfile, postgresqlGrants, postgresqlRole]
+      delete_mode: delete
+    entitlements:
+      provider: postgresql_roles
+      identifier: "{target}.{name}"
+      association_ref: postgresqlProfile
+      base_name: gateway-base
+    provisioning:
+      managed_roles:
+        - name: demo_readonly
+          privileges: [SELECT]
+    deployment:
+      environment:
+        POSTGRESQL_DEMO_HOST: 10.10.0.1
+        POSTGRESQL_DEMO_PORT: 5436
+        POSTGRESQL_DEMO_USER: demo_provisioner
+        POSTGRESQL_DEMO_PASSWORD: "DemoProvisioner5ecr3t!"
+        POSTGRESQL_DEMO_DATABASE: demo_db
+        POSTGRESQL_DEMO_CONNECT_TIMEOUT: 10
